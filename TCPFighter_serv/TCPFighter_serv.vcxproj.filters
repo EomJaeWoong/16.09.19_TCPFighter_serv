@@ -37,6 +37,12 @@
     <Filter Include="헤더 파일\Sector">
       <UniqueIdentifier>{8908a663-5aad-450c-96d7-00ff7da8e42c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="소스 파일\Log">
+      <UniqueIdentifier>{98b61d9f-5794-4e69-b0c9-62badb543461}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="헤더 파일\Log">
+      <UniqueIdentifier>{06479dce-1d7c-4cbb-9f99-8a31b6d52f55}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="NPacket.cpp">
@@ -53,6 +59,12 @@
     </ClCompile>
     <ClCompile Include="Character.cpp">
       <Filter>소스 파일\Content</Filter>
+    </ClCompile>
+    <ClCompile Include="Sector.cpp">
+      <Filter>소스 파일\Sector</Filter>
+    </ClCompile>
+    <ClCompile Include="Log.cpp">
+      <Filter>소스 파일\Log</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -73,6 +85,12 @@
     </ClInclude>
     <ClInclude Include="Character.h">
       <Filter>헤더 파일\Content</Filter>
+    </ClInclude>
+    <ClInclude Include="Sector.h">
+      <Filter>헤더 파일\Sector</Filter>
+    </ClInclude>
+    <ClInclude Include="Log.h">
+      <Filter>헤더 파일\Log</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

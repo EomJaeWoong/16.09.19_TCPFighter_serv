@@ -1,8 +1,4 @@
 #include "TCPFighter_serv.h"
-#include "PacketDefine.h"
-#include "StreamQueue.h"
-#include "NPacket.h"
-#include "Network.h"
 
 UINT64 uiSessionCount;
 
@@ -179,8 +175,10 @@ BOOL netProc_Accept(SOCKET socket)
 
 	sessionSock = accept(socket, (SOCKADDR *)&sockaddr, &addrlen);
 	if (sessionSock == INVALID_SOCKET)
+	{
+		_LOG(dfLOG_LEVEL_ERROR, L"Accept Socket Error \n");
 		return FALSE;
-
+	}
 	st_SESSION *pSession = CreateSession(sessionSock);
 
 	g_Session.insert(pair<SOCKET, st_SESSION *>(sessionSock, pSession));
@@ -212,6 +210,7 @@ BOOL netProc_Send(SOCKET socket)
 
 	else if (retval < 0)
 	{
+		_LOG(dfLOG_LEVEL_ERROR, L"Send Error - SessionID : %d \n", pSession->dwSessionID);
 		DisconnectSession(socket);
 		return FALSE;
 	}
@@ -227,6 +226,9 @@ void netProc_Recv(SOCKET socket)
 
 	retval = recv(pSession->socket, pSession->RecvQ.GetWriteBufferPtr(),
 		pSession->RecvQ.GetNotBrokenPutSize(), 0);
+
+	pSession->dwTrafficTick = timeGetTime();
+
 	pSession->RecvQ.MoveWritePos(retval);
 
 	if (retval == 0)
@@ -242,7 +244,7 @@ void netProc_Recv(SOCKET socket)
 	{
 		if (retval < 0)
 		{
-			//error
+			_LOG(dfLOG_LEVEL_ERROR, L"Recv Error - SessionID : %d \n", pSession->dwSessionID);
 			DisconnectSession(socket);
 			return;
 		}
@@ -312,6 +314,8 @@ BOOL PacketProc(st_SESSION *pSession)
 		break;
 
 	default :
+		_LOG(dfLOG_LEVEL_ERROR, L"Packet Proc Error [SessionID : %d][PacketType : %d] \n", 
+			pSession->dwSessionID, header.byType);
 		DisconnectSession(pSession->socket);
 		break;
 	}
@@ -366,15 +370,88 @@ void DisconnectSession(SOCKET socket)
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작
 //---------------------------------------------------------------------------------------
-BOOL recvProc_MoveStart(st_SESSION *pSession, CNPacket *cPacket)
+BOOL recvProc_MoveStart(st_SESSION *pSession, CNPacket *pPacket)
 {
+	BYTE byDirection;
+	short shX;
+	short shY;
 
+	*pPacket >> byDirection;
+	*pPacket >> shX;
+	*pPacket >> shY;
+
+	_LOG(dfLOG_LEVEL_DEBUG, L"# MOVESTART # [SessionID:%d][Direction:%d][X:%d][Y:%d]",
+		pSession->dwSessionID, byDirection, shX, shY);
+
+	st_CHARACTER *pCharacter = FindCharacter(pSession->dwSessionID);
+
+	if (NULL == pCharacter)
+	{
+		_LOG(dfLOG_LEVEL_ERROR, L"# MOVESTART > SessionID:%d Character Not Found!\n", 
+			pSession->dwSessionID);
+		return FALSE;
+	}
+
+	//-----------------------------------------------------------------------------------
+	// 받은 좌표와 서버 좌표가 너무 다를때 좌표 보정
+	//-----------------------------------------------------------------------------------
+	if (abs(pCharacter->shX - shX) > dfERROR_RANGE || abs(pCharacter->shY - shY) > dfERROR_RANGE)
+	{
+		int idrX, idrY;
+		// DeadReckoning으로 위치 확인
+		int iDeadRecFrame = DeadReckoningPos(pCharacter->dwAction, pCharacter->dwActionTick,
+			pCharacter->shActionX, pCharacter->shActionY, &idrX, &idrY);
+
+		// 차이나면 좌표 보정
+		if (abs(idrX - shX) > dfERROR_RANGE || abs(idrY - shY) > dfERROR_RANGE)
+		{
+			//Sync Packet 날림
+		}
+
+		shX = idrX;
+		shY = idrY;
+	}
+
+	//현재 액션 설정
+	pCharacter->dwAction = byDirection;
+
+	//현재 이동방향 설정
+	pCharacter->byMoveDirection = byDirection;
+
+	//캐릭터 방향 설정
+	switch (byDirection)
+	{
+	case dfPACKET_MOVE_DIR_RR :
+	case dfPACKET_MOVE_DIR_RU :
+	case dfPACKET_MOVE_DIR_RD :
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_RR;
+		break;
+
+	case dfPACKET_MOVE_DIR_LL :
+	case dfPACKET_MOVE_DIR_LU :
+	case dfPACKET_MOVE_DIR_LD :
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_LL;
+		break;
+	}
+
+	pCharacter->shX = shX;
+	pCharacter->shY = shY;
+
+	//섹터 업데이트
+
+	//tick정보 저장
+	pCharacter->dwActionTick = timeGetTime();
+	pCharacter->shActionX = pCharacter->shX;
+	pCharacter->shActionY = pCharacter->shY;
+
+	sendProc_MoveStart(pCharacter);
+	return TRUE;
 }
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 중지
 //---------------------------------------------------------------------------------------
-BOOL recvProc_MoveStop(st_SESSION *pSession, CNPacket *cPacket)
+BOOL recvProc_MoveStop(st_SESSION *pSession, CNPacket *pPacket)
 {
 
 }
@@ -382,7 +459,7 @@ BOOL recvProc_MoveStop(st_SESSION *pSession, CNPacket *cPacket)
 //---------------------------------------------------------------------------------------
 // 캐릭터 공격 1
 //---------------------------------------------------------------------------------------
-BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *cPacket)
+BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *pPacket)
 {
 
 }
@@ -390,7 +467,7 @@ BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *cPacket)
 //---------------------------------------------------------------------------------------
 // 캐릭터 공격 2
 //---------------------------------------------------------------------------------------
-BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *cPacket)
+BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *pPacket)
 {
 
 }
@@ -398,7 +475,7 @@ BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *cPacket)
 //---------------------------------------------------------------------------------------
 // 캐릭터 공격 3
 //---------------------------------------------------------------------------------------
-BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *cPacket)
+BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *pPacket)
 {
 
 }
@@ -412,9 +489,14 @@ BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *cPacket)
 //---------------------------------------------------------------------------------------
 // 자신의 캐릭터 할당
 //---------------------------------------------------------------------------------------
-BOOL sendProc_CreateMyCharacter()
+BOOL sendProc_CreateMyCharacter(st_SESSION *pSession, DWORD ID)
 {
+	st_NETWORK_PACKET_HEADER header;
+	CNPacket cPacket;
 
+	makePacket_CreateMyCharacter(&header, &cPacket, ID);
+
+	SendPacket_Unicast(pSession, &header, &cPacket);
 }
 
 //---------------------------------------------------------------------------------------
@@ -436,9 +518,14 @@ BOOL sendProc_DeleteCharacter()
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동시작
 //---------------------------------------------------------------------------------------
-BOOL sendProc_MoveStart()
+BOOL sendProc_MoveStart(st_CHARACTER *pCharacter)
 {
+	st_NETWORK_PACKET_HEADER header;
+	CNPacket cPacket;
 
+	makePacket_MoveStart(&header, &cPacket, pCharacter);
+
+	SendPacket_Around(pCharacter->pSession, &header, &cPacket);
 }
 
 //---------------------------------------------------------------------------------------
@@ -498,52 +585,255 @@ BOOL sendProc_Sync()
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_CreateMyCharacter();
+void makePacket_CreateMyCharacter(st_NETWORK_PACKET_HEADER *pHeader, CNPacket *pPacket, DWORD ID)
+{
+	int len;
+
+	*pPacket << (unsigned int)ID;
+	//방향
+	*pPacket << (short)(rand() % 6400);
+	*pPacket << (short)(rand() % 6400);
+	*pPacket << (BYTE)100;
+
+	len = pPacket->GetDataSize();
+	*pPacket << dfNETWORK_PACKET_END;
+
+	pHeader->byCode = dfNETWORK_PACKET_CODE;
+	pHeader->bySize = len;
+	pHeader->byType = dfPACKET_SC_CREATE_MY_CHARACTER;
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_CreateOtherCharacter();
+void makePacket_CreateOtherCharacter()
+{
+
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_DeleteCharacter();
+void makePacket_DeleteCharacter()
+{
+
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_MoveStart();
+void makePacket_MoveStart(st_NETWORK_PACKET_HEADER *pHeader, CNPacket *pPacket, st_CHARACTER *pCharacter)
+{
+	int len;
+
+	*pPacket << (unsigned int)pCharacter->dwSessionID;
+	*pPacket << pCharacter->byMoveDirection;
+	*pPacket << pCharacter->shX;
+	*pPacket << pCharacter->shY;
+
+	len = pPacket->GetDataSize();
+	*pPacket << dfNETWORK_PACKET_END;
+
+	pHeader->byCode = dfNETWORK_PACKET_CODE;
+	pHeader->bySize = len;
+	pHeader->byType = dfPACKET_SC_MOVE_START;
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_MoveStop();
+void makePacket_MoveStop()
+{
+
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Attack1();
+void makePacket_Attack1()
+{
+
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Attack2();
+void makePacket_Attack2()
+{
+
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Attack3();
+void makePacket_Attack3()
+{
+
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Damage();
+void makePacket_Damage()
+{
+
+}
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Sync();
+void makePacket_Sync()
+{
+
+}
 
 
 /*-------------------------------------------------------------------------------------*/
+
+
+
+/*-------------------------------------------------------------------------------------*/
+// 패킷 보내는 함수
+
+//---------------------------------------------------------------------------------------
+// 해당 Sector에 보냄
+//---------------------------------------------------------------------------------------
+void SendPacket_SectorOne(int iSectorX, int iSectorY, st_NETWORK_PACKET_HEADER *pHeader
+	,CNPacket *pPacket, st_SESSION *pExceptSession)
+{
+
+}
+
+//---------------------------------------------------------------------------------------
+// 해당 Session에 보냄
+//---------------------------------------------------------------------------------------
+void SendPacket_Unicast(st_SESSION *pSession, st_NETWORK_PACKET_HEADER *pHeader, 
+	CNPacket *pPacket)
+{
+	pSession->SendQ.Put((char *)pHeader, sizeof(st_NETWORK_PACKET_HEADER));
+	pSession->SendQ.Put((char *)pPacket, pPacket->GetDataSize());
+}
+
+//---------------------------------------------------------------------------------------
+// 주위 Sector에 보냄
+//---------------------------------------------------------------------------------------
+void SendPacket_Around(st_SESSION *pSession, st_NETWORK_PACKET_HEADER *pHeader, 
+	CNPacket *pPacket, bool bSendMe = false)
+{
+	
+}
+
+//---------------------------------------------------------------------------------------
+// 전체 보냄
+//---------------------------------------------------------------------------------------
+void Sendpacket_Broadcast(st_SESSION *pSession, st_NETWORK_PACKET_HEADER *pHeader, 
+	CNPacket *pPacket)
+{
+
+}
+
+/*-------------------------------------------------------------------------------------*/
+
+
+/*-------------------------------------------------------------------------------------*/
+// DeadReckoning
+/*-------------------------------------------------------------------------------------*/
+int DeadReckoningPos(DWORD dwAction, DWORD dwActionTick, int iOldPosX, int iOldPosY, int *pPosX, int *pPosY)
+{
+	// 프레임 계산
+	DWORD dwIntervalTick = timeGetTime() - dwActionTick;
+
+	int iActionFrame = dwIntervalTick / 20;
+
+	int iRPosX = iOldPosX;
+	int iRPosY = iOldPosY;
+
+	//-----------------------------------------------------------------------------------
+	// 계산 된 프레임으로 x, y축 좌표 이동값 구하기
+	//-----------------------------------------------------------------------------------
+	int iDX = iActionFrame * dfRECKONING_SPEED_PLAYER_X;
+	int iDY = iActionFrame * dfRECKONING_SPEED_PLAYER_Y;
+
+	switch (dwAction)
+	{
+	case dfACTION_MOVE_LL :
+		iRPosX = iOldPosX - iDX;
+		iRPosY = iOldPosY;
+		break;
+
+	case dfACTION_MOVE_LU :
+		iRPosX = iOldPosX - iDX;
+		iRPosY = iOldPosY - iDY;
+		break;
+
+	case dfACTION_MOVE_UU:
+		iRPosX = iOldPosX;
+		iRPosY = iOldPosY - iDY;
+		break;
+
+	case dfACTION_MOVE_RU:
+		iRPosX = iOldPosX + iDX;
+		iRPosY = iOldPosY - iDY;
+		break;
+
+	case dfACTION_MOVE_RR:
+		iRPosX = iOldPosX + iDX;
+		iRPosY = iOldPosY;
+		break;
+
+	case dfACTION_MOVE_RD:
+		iRPosX = iOldPosX + iDX;
+		iRPosY = iOldPosY + iDY;
+		break;
+
+	case dfACTION_MOVE_DD:
+		iRPosX = iOldPosX;
+		iRPosY = iOldPosY + iDY;
+		break;
+
+	case dfACTION_MOVE_LD:
+		iRPosX = iOldPosX - iDX;
+		iRPosY = iOldPosY + iDY;
+		break;
+	}
+
+	// 화면 영역을 벗어났을 때 처리
+	if (iRPosX <= dfRANGE_MOVE_LEFT)
+	{
+		iRPosX = dfRANGE_MOVE_LEFT;
+		iRPosY = iRPosY - ((iRPosY - iOldPosY) / (iRPosX - iOldPosX)) * iRPosX;
+	}
+
+	if (iRPosX >= dfRANGE_MOVE_RIGHT)
+	{
+		iRPosX = dfRANGE_MOVE_RIGHT;
+		iRPosY = iRPosY - ((iRPosY - iOldPosY) / (iRPosX - iOldPosX)) * iRPosX;
+	}
+
+	if (iRPosY <= dfRANGE_MOVE_TOP)
+	{
+		if (0 != (iRPosX - iOldPosX))
+			iRPosX = iRPosY / ((iRPosY - iOldPosY) / (iRPosX - iOldPosX)) - iRPosX;
+
+		else
+			iRPosX = iOldPosX;
+
+		iRPosY = dfRANGE_MOVE_TOP;
+	}
+
+	if (iRPosY >= dfRANGE_MOVE_BOTTOM)
+	{
+		if (0 != (iRPosX - iOldPosX))
+			iRPosX = iRPosY / ((iRPosY - iOldPosY) / (iRPosX - iOldPosX)) - iRPosX;
+			
+		else
+			iRPosX = iOldPosX;
+
+		iRPosY = dfRANGE_MOVE_BOTTOM;
+	}
+
+	*pPosX = iRPosX;
+	*pPosY = iRPosY;
+
+	return iActionFrame;
+}
