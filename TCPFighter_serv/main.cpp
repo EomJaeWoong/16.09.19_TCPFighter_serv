@@ -41,6 +41,8 @@ void main()
 		ServerControl();
 		monitor();
 	}
+
+	timeBeginPeriod(1);
 }
 
 void ServerControl()

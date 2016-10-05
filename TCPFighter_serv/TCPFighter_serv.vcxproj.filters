@@ -63,7 +63,7 @@
     <ClCompile Include="Log.cpp">
       <Filter>소스 파일\Log</Filter>
     </ClCompile>
-    <ClCompile Include="Character.cpp">
+    <ClCompile Include="Content.cpp">
       <Filter>소스 파일\Content</Filter>
     </ClCompile>
   </ItemGroup>

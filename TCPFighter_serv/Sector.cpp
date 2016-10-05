@@ -19,8 +19,9 @@ Sector			g_Sector[dfSECTOR_MAX_Y][dfSECTOR_MAX_X];
 
 void Sector_AddCharacter(st_CHARACTER *pCharacter)
 {
-	if (pCharacter->CurSecter.iX != -1 || pCharacter->CurSecter.iY != -1)
-		return;
+	//if ((pCharacter->CurSector.iX > 0) || (pCharacter->CurSector.iY >0) ||
+	//	(pCharacter->CurSector.iX > dfSECTOR_MAX_X) || (pCharacter->CurSector.iX > dfSECTOR_MAX_Y))
+	//	return;
 
 	int iSectorX = pCharacter->shX / dfSECTOR_PIXEL_WIDTH;
 	int iSectorY = pCharacter->shY / dfSECTOR_PIXEL_HEIGHT;
@@ -31,19 +32,20 @@ void Sector_AddCharacter(st_CHARACTER *pCharacter)
 
 	g_Sector[iSectorY][iSectorX].push_back(pCharacter);
 
-	pCharacter->OldSecter.iX = pCharacter->CurSecter.iX;
-	pCharacter->OldSecter.iY = pCharacter->CurSecter.iY;
+	pCharacter->OldSector.iX = pCharacter->CurSector.iX;
+	pCharacter->OldSector.iY = pCharacter->CurSector.iY;
 
-	pCharacter->CurSecter.iX = iSectorX;
-	pCharacter->CurSecter.iY = iSectorY;
+	pCharacter->CurSector.iX = iSectorX;
+	pCharacter->CurSector.iY = iSectorY;
 }
 
 void Sector_RemoveCharacter(st_CHARACTER *pCharacter)
 {
-	if (pCharacter->CurSecter.iX != -1 || pCharacter->CurSecter.iY != -1)
-		return;
+	//if ((pCharacter->CurSector.iX > 0) || (pCharacter->CurSector.iY >0) ||
+	//	(pCharacter->CurSector.iX > dfSECTOR_MAX_X) || (pCharacter->CurSector.iX > dfSECTOR_MAX_Y))
+	//	return;
 
-	Sector &SectorList = g_Sector[pCharacter->CurSecter.iY][pCharacter->CurSecter.iX];
+	Sector &SectorList = g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX];
 	Sector::iterator sIter;
 
 	for (sIter = SectorList.begin(); sIter != SectorList.end();++sIter)
@@ -55,16 +57,16 @@ void Sector_RemoveCharacter(st_CHARACTER *pCharacter)
 		}
 	}
 
-	pCharacter->OldSecter.iX = pCharacter->CurSecter.iX;
-	pCharacter->OldSecter.iY = pCharacter->CurSecter.iY;
-	pCharacter->CurSecter.iX = -1;
-	pCharacter->CurSecter.iY = -1;
+	pCharacter->OldSector.iX = pCharacter->CurSector.iX;
+	pCharacter->OldSector.iY = pCharacter->CurSector.iY;
+	pCharacter->CurSector.iX = -1;
+	pCharacter->CurSector.iY = -1;
 }
 
-bool Sector_UpdateCharacter(st_CHARACTER * pCharacter)
+bool Sector_UpdateCharacter(st_CHARACTER *pCharacter)
 {
-	int iBeforeSectorX = pCharacter->CurSecter.iX;
-	int iBeforeSectorY = pCharacter->CurSecter.iY;
+	int iBeforeSectorX = pCharacter->CurSector.iX;
+	int iBeforeSectorY = pCharacter->CurSector.iY;
 
 	int iNewSectorX = pCharacter->shX / dfSECTOR_PIXEL_WIDTH;
 	int iNewSectorY = pCharacter->shY / dfSECTOR_PIXEL_HEIGHT;
@@ -75,8 +77,8 @@ bool Sector_UpdateCharacter(st_CHARACTER * pCharacter)
 	Sector_RemoveCharacter(pCharacter);
 	Sector_AddCharacter(pCharacter);
 
-	pCharacter->OldSecter.iX = iBeforeSectorX;
-	pCharacter->OldSecter.iY = iBeforeSectorY;
+	pCharacter->OldSector.iX = iBeforeSectorX;
+	pCharacter->OldSector.iY = iBeforeSectorY;
 
 	return true;
 }
@@ -117,8 +119,8 @@ void GetUpdateSectorAround(st_CHARACTER *pCharacter, st_SECTOR_AROUND *pRemoveSe
 	pRemoveSector->iCount = 0;
 	pAddSector->iCount = 0;
 
-	GetSectorAround(pCharacter->OldSecter.iX, pCharacter->OldSecter.iY, &OldSectorAround);
-	GetSectorAround(pCharacter->CurSecter.iX, pCharacter->CurSecter.iY, &CurSectorAround);
+	GetSectorAround(pCharacter->OldSector.iX, pCharacter->OldSector.iY, &OldSectorAround);
+	GetSectorAround(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &CurSectorAround);
 
 	//---------------------------------------------------------------------------------------------------
 	// 이전 섹터 삭제
@@ -200,7 +202,6 @@ void CharacterSectorUpdatePacket(st_CHARACTER *pCharacter)
 		for (sIter = g_Sector[stRemoveSector.Around[iCnt].iY][stRemoveSector.Around[iCnt].iX].begin();
 			sIter != g_Sector[stRemoveSector.Around[iCnt].iY][stRemoveSector.Around[iCnt].iX].end(); ++sIter)
 		{
-			cPacket.Clear();
 			makePacket_DeleteCharacter(&cPacket, (*sIter)->dwSessionID);
 
 			SendPacket_Unicast(pCharacter->pSession, &cPacket);
@@ -219,7 +220,7 @@ void CharacterSectorUpdatePacket(st_CHARACTER *pCharacter)
 		SendPacket_SectorOne(stAddSector.Around[iCnt].iX, stAddSector.Around[iCnt].iY, &cPacket, NULL);
 	}
 
-	// 이동
+	// 이동 -> 이 패킷이 안감
 	makePacket_MoveStart(&cPacket, pCharacter->dwSessionID, pCharacter->byMoveDirection,
 		pCharacter->shX, pCharacter->shY);
 
@@ -289,10 +290,6 @@ void CharacterSectorUpdatePacket(st_CHARACTER *pCharacter)
 						pOtherCharacter->shX, pOtherCharacter->shY);
 
 					SendPacket_Unicast(pCharacter->pSession, &cPacket);
-					break;
-
-				default :
-					_LOG(dfLOG_LEVEL_ERROR, L"Sector > SessionID:%d SectorUpdate error!");
 					break;
 				}
 			}

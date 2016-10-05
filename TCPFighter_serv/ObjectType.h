@@ -1,7 +1,7 @@
 #ifndef __OBJECTTYPE__H__
 #define __OBJECTTYPE__H__
 
-#define dfSERVER_FRAME	 500
+#define dfSERVER_FRAME	 50
 
 //-----------------------------------------------------------------
 // Action

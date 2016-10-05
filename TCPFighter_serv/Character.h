@@ -20,8 +20,8 @@ struct st_CHARACTER
 	short shActionX;
 	short shActionY;
 
-	st_SECTOR_POS CurSecter;
-	st_SECTOR_POS OldSecter;
+	st_SECTOR_POS CurSector;
+	st_SECTOR_POS OldSector;
 
 	char chHP;
 };

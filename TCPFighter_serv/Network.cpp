@@ -219,7 +219,8 @@ BOOL netProc_Accept(SOCKET socket)
 	//-----------------------------------------------------------------------------------
 	st_CHARACTER *pCharacter = CreateCharacter(pSession);
 	g_CharacterMap.insert(pair<DWORD, st_CHARACTER *>(pSession->dwSessionID, pCharacter));
-	
+	Sector_UpdateCharacter(pCharacter);
+
 	//-----------------------------------------------------------------------------------
 	// 캐릭터 생성 전송
 	//-----------------------------------------------------------------------------------
@@ -1024,7 +1025,7 @@ void SendPacket_SectorOne(int iSectorX, int iSectorY, CNPacket *pPacket,
 		if ((*sIter)->pSession == pExceptSession)
 			continue;
 
-		(*sIter)->pSession->SendQ.Put((char *)pPacket->GetBufferPtr(), pPacket->GetDataSize());
+		SendPacket_Unicast((*sIter)->pSession, pPacket);
 	}
 }
 
@@ -1044,9 +1045,7 @@ void SendPacket_Around(st_SESSION *pSession, CNPacket *pPacket, bool bSendMe)
 	st_CHARACTER *pCharacter = FindCharacter(pSession->dwSessionID);
 
 	st_SECTOR_AROUND stDestSector;
-	GetSectorAround(pCharacter->CurSecter.iX, pCharacter->CurSecter.iY, &stDestSector);
-
-	Sector::iterator sIter;
+	GetSectorAround(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &stDestSector);
 
 	for (int iCnt = 0; iCnt < stDestSector.iCount; iCnt++)
 	{
@@ -1062,13 +1061,13 @@ void SendPacket_Around(st_SESSION *pSession, CNPacket *pPacket, bool bSendMe)
 //---------------------------------------------------------------------------------------
 // 전체 보냄
 //---------------------------------------------------------------------------------------
-void Sendpacket_Broadcast(st_SESSION *pSession,	CNPacket *pPacket)
+void SendPacket_Broadcast(st_SESSION *pSession,	CNPacket *pPacket)
 {
 	Session::iterator sIter;
 
 	for (sIter = g_Session.begin(); sIter != g_Session.end(); ++sIter)
 	{
-		pSession->SendQ.Put((char *)pPacket->GetBufferPtr(), pPacket->GetDataSize());
+		SendPacket_Unicast(pSession, pPacket);
 	}
 }
 
