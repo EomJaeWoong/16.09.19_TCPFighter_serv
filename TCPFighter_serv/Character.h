@@ -1,15 +1,9 @@
 #ifndef __CHARACTER__H__
 #define __CHARACTER__H__
 
-#define dfACTION_MOVE_LL 0
-#define dfACTION_MOVE_LU 1
-#define dfACTION_MOVE_UU 2
-#define dfACTION_MOVE_RU 3
-#define dfACTION_MOVE_RR 4
-#define dfACTION_MOVE_RD 5
-#define dfACTION_MOVE_DD 6
-#define dfACTION_MOVE_LD 7
-
+//-----------------------------------------------------------------
+// 캐릭터 정의
+//-----------------------------------------------------------------
 struct st_CHARACTER
 {
 	st_SESSION *pSession;
@@ -32,8 +26,9 @@ struct st_CHARACTER
 	char chHP;
 };
 
+//------------------------------------------------------------------
+// 캐릭터 객체 관리 map type 정의
+//------------------------------------------------------------------
 typedef map<DWORD, st_CHARACTER *> Character;
-
-st_CHARACTER *FindCharacter(DWORD dwSessionID);
 
 #endif

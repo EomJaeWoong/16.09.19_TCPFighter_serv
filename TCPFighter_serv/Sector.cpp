@@ -1,6 +1,21 @@
-#include "TCPFighter_serv.h"
+#include <WinSock2.h>
+#include <list>
+#include <map>
+
+using namespace std;
+
+#include "ObjectType.h"
+#include "NPacket.h"
+#include "StreamQueue.h"
+#include "Session.h"
+#include "SectorDef.h"
 #include "Character.h"
 #include "Sector.h"
+#include "Network.h"
+#include "Content.h"
+#include "Log.h"
+
+Sector			g_Sector[dfSECTOR_MAX_Y][dfSECTOR_MAX_X];
 
 void Sector_AddCharacter(st_CHARACTER *pCharacter)
 {
@@ -119,12 +134,12 @@ void GetUpdateSectorAround(st_CHARACTER *pCharacter, st_SECTOR_AROUND *pRemoveSe
 				bFind = true;
 				break;
 			}
+		}
 
-			if (bFind == false)
-			{
-				pRemoveSector->Around[pRemoveSector->iCount] = OldSectorAround.Around[iCntOld];
-				pRemoveSector->iCount++;
-			}
+		if (bFind == false)
+		{
+			pRemoveSector->Around[pRemoveSector->iCount] = OldSectorAround.Around[iCntOld];
+			pRemoveSector->iCount++;
 		}
 	}
 
@@ -142,12 +157,12 @@ void GetUpdateSectorAround(st_CHARACTER *pCharacter, st_SECTOR_AROUND *pRemoveSe
 				bFind = true;
 				break;
 			}
+		}
 
-			if (bFind == false)
-			{
-				pAddSector->Around[pAddSector->iCount] = CurSectorAround.Around[iCntCur];
-				pAddSector->iCount++;
-			}
+		if (bFind == false)
+		{
+			pAddSector->Around[pAddSector->iCount] = CurSectorAround.Around[iCntCur];
+			pAddSector->iCount++;
 		}
 	}
 }
@@ -160,5 +175,127 @@ void GetUpdateSectorAround(st_CHARACTER *pCharacter, st_SECTOR_AROUND *pRemoveSe
 //-------------------------------------------------------------------------------------------------------
 void CharacterSectorUpdatePacket(st_CHARACTER *pCharacter)
 {
+	st_SECTOR_AROUND stRemoveSector, stAddSector;
+	CNPacket cPacket;
 
+	GetUpdateSectorAround(pCharacter, &stRemoveSector, &stAddSector);
+
+	makePacket_DeleteCharacter(&cPacket, pCharacter->dwSessionID);
+
+	//---------------------------------------------------------------------------------------------------
+	// 없어진 섹터 부분에서 캐릭터 삭제 메시지를 날림
+	//---------------------------------------------------------------------------------------------------
+	for (int iCnt = 0; iCnt < stRemoveSector.iCount; iCnt++)
+	{
+		SendPacket_SectorOne(stRemoveSector.Around[iCnt].iX, stRemoveSector.Around[iCnt].iY,
+			&cPacket, NULL);
+	}
+
+	//---------------------------------------------------------------------------------------------------
+	// 이동하는 캐릭터에게 이전 섹터에서 제외된 섹터의 캐릭터들 삭제 시키는 메시지를 날림
+	//---------------------------------------------------------------------------------------------------
+	Sector::iterator sIter;
+	for (int iCnt = 0; iCnt < stRemoveSector.iCount; iCnt++)
+	{
+		for (sIter = g_Sector[stRemoveSector.Around[iCnt].iY][stRemoveSector.Around[iCnt].iX].begin();
+			sIter != g_Sector[stRemoveSector.Around[iCnt].iY][stRemoveSector.Around[iCnt].iX].end(); ++sIter)
+		{
+			cPacket.Clear();
+			makePacket_DeleteCharacter(&cPacket, (*sIter)->dwSessionID);
+
+			SendPacket_Unicast(pCharacter->pSession, &cPacket);
+		}
+	}
+
+	//---------------------------------------------------------------------------------------------------
+	// 새로 추가된 섹터에 - 캐릭터 생성 메시지 & 이동 메시지
+	//---------------------------------------------------------------------------------------------------
+	makePacket_CreateOtherCharacter(&cPacket, pCharacter->dwSessionID, pCharacter->byDirection,
+		pCharacter->shX, pCharacter->shY, pCharacter->chHP);
+
+	// 생성
+	for (int iCnt = 0; iCnt < stAddSector.iCount; iCnt++)
+	{
+		SendPacket_SectorOne(stAddSector.Around[iCnt].iX, stAddSector.Around[iCnt].iY, &cPacket, NULL);
+	}
+
+	// 이동
+	makePacket_MoveStart(&cPacket, pCharacter->dwSessionID, pCharacter->byMoveDirection,
+		pCharacter->shX, pCharacter->shY);
+
+	for (int iCnt = 0; iCnt < stAddSector.iCount; iCnt++)
+	{
+		SendPacket_SectorOne(stAddSector.Around[iCnt].iX, stAddSector.Around[iCnt].iY, &cPacket, NULL);
+	}
+
+	//---------------------------------------------------------------------------------------------------
+	// 이동하는 캐릭터에게 - 새로 진입한 섹터의 캐릭터들 생성 메시지
+	//---------------------------------------------------------------------------------------------------
+	st_CHARACTER *pOtherCharacter;
+
+	for (int iCnt = 0; iCnt < stAddSector.iCount; iCnt++)
+	{
+		for (sIter = g_Sector[stAddSector.Around[iCnt].iY][stAddSector.Around[iCnt].iX].begin();
+			sIter != g_Sector[stAddSector.Around[iCnt].iY][stAddSector.Around[iCnt].iX].end(); ++sIter)
+		{
+			pOtherCharacter = (*sIter);
+
+			if (pOtherCharacter != pCharacter)
+			{
+				//---------------------------------------------------------------------------------------
+				// 다른 캐릭터들 생성
+				//---------------------------------------------------------------------------------------
+				makePacket_CreateOtherCharacter(&cPacket, pOtherCharacter->dwSessionID,
+					pOtherCharacter->byDirection, pOtherCharacter->shX, pOtherCharacter->shY,
+					pOtherCharacter->chHP);
+
+				SendPacket_Unicast(pCharacter->pSession, &cPacket);
+
+				//---------------------------------------------------------------------------------------
+				// 다른 캐릭터들 이동, 공격 메시지 보냄
+				//---------------------------------------------------------------------------------------
+				switch (pOtherCharacter->dwAction)
+				{
+				case dfACTION_MOVE_LL :
+				case dfACTION_MOVE_LU :
+				case dfACTION_MOVE_UU :
+				case dfACTION_MOVE_RU :
+				case dfACTION_MOVE_RR :
+				case dfACTION_MOVE_RD :
+				case dfACTION_MOVE_DD :
+				case dfACTION_MOVE_LD :
+					makePacket_MoveStart(&cPacket, pOtherCharacter->dwSessionID,
+						pOtherCharacter->byMoveDirection, pOtherCharacter->shX, pOtherCharacter->shY);
+
+					SendPacket_Unicast(pCharacter->pSession, &cPacket);
+					break;
+
+				case dfACTION_ATTACK1 :
+					makePacket_Attack1(&cPacket, pOtherCharacter->dwSessionID, pOtherCharacter->byDirection,
+						pOtherCharacter->shX, pOtherCharacter->shY);
+
+					SendPacket_Unicast(pCharacter->pSession, &cPacket);
+					break;
+
+				case dfACTION_ATTACK2:
+					makePacket_Attack2(&cPacket, pOtherCharacter->dwSessionID, pOtherCharacter->byDirection,
+						pOtherCharacter->shX, pOtherCharacter->shY);
+
+					SendPacket_Unicast(pCharacter->pSession, &cPacket);
+					break;
+
+				case dfACTION_ATTACK3:
+					makePacket_Attack3(&cPacket, pOtherCharacter->dwSessionID, pOtherCharacter->byDirection,
+						pOtherCharacter->shX, pOtherCharacter->shY);
+
+					SendPacket_Unicast(pCharacter->pSession, &cPacket);
+					break;
+
+				default :
+					_LOG(dfLOG_LEVEL_ERROR, L"Sector > SessionID:%d SectorUpdate error!");
+					break;
+				}
+			}
+		}
+	}
 }

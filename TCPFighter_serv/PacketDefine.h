@@ -69,19 +69,8 @@ struct st_NETWORK_PACKET_HEADER
 //	1	-	HP
 //
 //---------------------------------------------------------------
-#pragma pack(1)
-struct stPACKET_SC_CREATE_MY_CHARACTER
-{
-	st_NETWORK_PACKET_HEADER Header;
 
-	DWORD	ID;
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
-	BYTE	HP;
 
-	BYTE Endcode;
-};
 
 #define	dfPACKET_SC_CREATE_OTHER_CHARACTER		1
 //---------------------------------------------------------------
@@ -98,16 +87,7 @@ struct stPACKET_SC_CREATE_MY_CHARACTER
 //	1	-	HP
 //
 //---------------------------------------------------------------
-struct stPACKET_SC_CREATE_OTHER_CHARACTER
-{
-	DWORD	ID;
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
-	BYTE	HP;
 
-	BYTE Endcode;
-};
 
 
 #define	dfPACKET_SC_DELETE_CHARACTER			2
@@ -119,12 +99,7 @@ struct stPACKET_SC_CREATE_OTHER_CHARACTER
 //	4	-	ID
 //
 //---------------------------------------------------------------
-struct stPACKET_SC_DELETE_CHARACTER
-{
-	DWORD	ID;
 
-	BYTE Endcode;
-};
 
 
 #define	dfPACKET_CS_MOVE_START					10
@@ -150,14 +125,6 @@ struct stPACKET_SC_DELETE_CHARACTER
 #define dfPACKET_MOVE_DIR_RD					5
 #define dfPACKET_MOVE_DIR_DD					6
 #define dfPACKET_MOVE_DIR_LD					7
-struct stPACKET_CS_MOVE_START
-{
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
-
-	BYTE Endcode;
-};
 
 
 
@@ -177,17 +144,6 @@ struct stPACKET_CS_MOVE_START
 //	2	-	Y
 //
 //---------------------------------------------------------------
-struct stPACKET_SC_MOVE_START
-{
-	DWORD	ID;
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
-
-	BYTE Endcode;
-};
-
-
 
 
 
@@ -202,14 +158,7 @@ struct stPACKET_SC_MOVE_START
 //	2	-	Y
 //
 //---------------------------------------------------------------
-struct stPACKET_CS_MOVE_STOP
-{
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
 
-	BYTE Endcode;
-};
 
 
 #define	dfPACKET_SC_MOVE_STOP					13
@@ -225,15 +174,7 @@ struct stPACKET_CS_MOVE_STOP
 //	2	-	Y
 //
 //---------------------------------------------------------------
-struct stPACKET_SC_MOVE_STOP
-{
-	DWORD	ID;
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
 
-	BYTE Endcode;
-};
 
 
 #define	dfPACKET_CS_ATTACK1						20
@@ -250,14 +191,8 @@ struct stPACKET_SC_MOVE_STOP
 //	2	-	Y	
 //
 //---------------------------------------------------------------
-struct stPACKET_CS_ATTACK1
-{
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
 
-	BYTE Endcode;
-};
+
 
 #define	dfPACKET_SC_ATTACK1						21
 //---------------------------------------------------------------
@@ -272,15 +207,7 @@ struct stPACKET_CS_ATTACK1
 //	2	-	Y
 //
 //---------------------------------------------------------------
-struct stPACKET_SC_ATTACK1
-{
-	DWORD	ID;
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
 
-	BYTE Endcode;
-};
 
 
 #define	dfPACKET_CS_ATTACK2						22
@@ -297,14 +224,8 @@ struct stPACKET_SC_ATTACK1
 //	2	-	Y
 //
 //---------------------------------------------------------------
-struct stPACKET_CS_ATTACK2
-{
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
 
-	BYTE Endcode;
-};
+
 
 #define	dfPACKET_SC_ATTACK2						23
 //---------------------------------------------------------------
@@ -319,15 +240,7 @@ struct stPACKET_CS_ATTACK2
 //	2	-	Y
 //
 //---------------------------------------------------------------
-struct stPACKET_SC_ATTACK2
-{
-	DWORD	ID;
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
 
-	BYTE Endcode;
-};
 
 
 #define	dfPACKET_CS_ATTACK3						24
@@ -344,14 +257,6 @@ struct stPACKET_SC_ATTACK2
 //	2	-	Y
 //
 //---------------------------------------------------------------
-struct stPACKET_CS_ATTACK3
-{
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
-
-	BYTE Endcode;
-};
 
 
 
@@ -368,16 +273,6 @@ struct stPACKET_CS_ATTACK3
 //	2	-	Y
 //
 //---------------------------------------------------------------
-struct stPACKET_SC_ATTACK3
-{
-	DWORD	ID;
-	BYTE	Direction;
-	WORD	X;
-	WORD	Y;
-
-	BYTE Endcode;
-};
-
 
 
 
@@ -392,16 +287,9 @@ struct stPACKET_SC_ATTACK3
 //	1	-	DamageHP	( 피해자 HP )
 //
 //---------------------------------------------------------------
-struct stPACKET_SC_DAMAGE
-{
-	DWORD	AttackID;
-	DWORD	DamageID;
-	BYTE	DamageHP;
 
-	BYTE Endcode;
-};
 
-#pragma pack(4)
+
 // 안쓰는거
 #define	dfPACKET_CS_SYNC						250
 //---------------------------------------------------------------
@@ -416,7 +304,8 @@ struct stPACKET_SC_DAMAGE
 //
 //---------------------------------------------------------------
 
-// 안쓰는거
+
+
 #define	dfPACKET_SC_SYNC						251
 //---------------------------------------------------------------
 // 동기화를 위한 패킷					Server -> Client

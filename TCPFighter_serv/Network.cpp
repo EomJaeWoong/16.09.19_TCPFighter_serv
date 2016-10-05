@@ -1,6 +1,27 @@
-#include "TCPFighter_serv.h"
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+#include <list>
+#include <map>
 
-UINT64 uiSessionCount;
+#pragma comment(lib, "Ws2_32.lib")
+
+using namespace std;
+
+#include "PacketDefine.h"
+#include "ObjectType.h"
+#include "StreamQueue.h"
+#include "NPacket.h"
+#include "Session.h"
+#include "SectorDef.h"
+#include "Character.h"
+#include "Sector.h"
+#include "Content.h"
+#include "Network.h"
+#include "Log.h"
+
+DWORD			uiSessionCount;
+SOCKET			g_ListenSock;
+Session			g_Session;
 
 /*-------------------------------------------------------------------------------------*/
 // Server Setup
@@ -119,20 +140,26 @@ void netIOProcess()
 
 		else
 		{
-			for (int iCnt = 0; iCnt < FD_SETSIZE; iCnt++){
+			for (int iCnt = 0; iCnt < retval; iCnt++){
 				if (FD_ISSET((*ReadIter)->fd_array[iCnt], *ReadIter))
 				{
 					//---------------------------------------------------------------------------
 					// Accept 처리
 					//---------------------------------------------------------------------------
 					if ((*ReadIter)->fd_array[iCnt] == g_ListenSock)
+					{
 						netProc_Accept((*ReadIter)->fd_array[iCnt]);
+						continue;
+					}
 
 					//---------------------------------------------------------------------------
 					// Receive 처리
 					//---------------------------------------------------------------------------
 					else
+					{
 						netProc_Recv((*ReadIter)->fd_array[iCnt]);
+						continue;
+					}
 				}
 
 				//-------------------------------------------------------------------------------
@@ -172,20 +199,45 @@ BOOL netProc_Accept(SOCKET socket)
 	WCHAR wcAddr[16];
 	SOCKET sessionSock;
 	SOCKADDR_IN sockaddr;
+	CNPacket cPacket;
 
 	sessionSock = accept(socket, (SOCKADDR *)&sockaddr, &addrlen);
 	if (sessionSock == INVALID_SOCKET)
 	{
-		_LOG(dfLOG_LEVEL_ERROR, L"Accept Socket Error \n");
+		_LOG(dfLOG_LEVEL_ERROR, L"Accept Socket Error");
 		return FALSE;
 	}
-	st_SESSION *pSession = CreateSession(sessionSock);
 
+	//-----------------------------------------------------------------------------------
+	// Session 생성
+	//-----------------------------------------------------------------------------------
+	st_SESSION *pSession = CreateSession(sessionSock);
 	g_Session.insert(pair<SOCKET, st_SESSION *>(sessionSock, pSession));
 
-	InetNtop(AF_INET, &sockaddr.sin_addr, wcAddr, sizeof(wcAddr));
+	//-----------------------------------------------------------------------------------
+	// Character 생성
+	//-----------------------------------------------------------------------------------
+	st_CHARACTER *pCharacter = CreateCharacter(pSession);
+	g_CharacterMap.insert(pair<DWORD, st_CHARACTER *>(pSession->dwSessionID, pCharacter));
+	
+	//-----------------------------------------------------------------------------------
+	// 캐릭터 생성 전송
+	//-----------------------------------------------------------------------------------
+	makePacket_CreateMyCharacter(&cPacket, pSession->dwSessionID, pCharacter->byDirection, 
+		pCharacter->shX, pCharacter->shY, pCharacter->chHP);
+	SendPacket_Unicast(pSession, &cPacket);
+	_LOG(dfLOG_LEVEL_DEBUG, L"PACKET_Unicast - CreateMyCharacter [SessionID:%d][X:%d][Y:%d]",
+		pCharacter->dwSessionID, pCharacter->shX, pCharacter->shY);
 
-	wprintf(L"Accept - %s:%d Socket : %d \n", wcAddr, ntohs(sockaddr.sin_port),
+	//-----------------------------------------------------------------------------------
+	// 주위 섹터의 정보 보냄
+	//-----------------------------------------------------------------------------------
+	CharacterSectorUpdatePacket(pCharacter);
+	_LOG(dfLOG_LEVEL_DEBUG, L"PACKET_Around - CreateOtherCharacter [SessionID:%d][X:%d][Y:%d]",
+		pCharacter->dwSessionID, pCharacter->shX, pCharacter->shY);
+
+	InetNtop(AF_INET, &sockaddr.sin_addr, wcAddr, sizeof(wcAddr));
+	_LOG(dfLOG_LEVEL_DEBUG, L"Accept - %s:%d Socket : %d", wcAddr, ntohs(sockaddr.sin_port),
 		pSession->socket);
 
 	return TRUE;
@@ -203,6 +255,7 @@ BOOL netProc_Send(SOCKET socket)
 	{
 		retval = send(socket, pSession->SendQ.GetReadBufferPtr(),
 			pSession->SendQ.GetNotBrokenGetSize(), 0);
+		pSession->SendQ.RemoveData(retval);
 	}
 
 	if (retval == 0)
@@ -210,10 +263,12 @@ BOOL netProc_Send(SOCKET socket)
 
 	else if (retval < 0)
 	{
-		_LOG(dfLOG_LEVEL_ERROR, L"Send Error - SessionID : %d \n", pSession->dwSessionID);
+		_LOG(dfLOG_LEVEL_ERROR, L"Send Error - SessionID : %d", pSession->dwSessionID);
 		DisconnectSession(socket);
 		return FALSE;
 	}
+
+	return TRUE;
 }
 
 /*-------------------------------------------------------------------------------------*/
@@ -226,7 +281,10 @@ void netProc_Recv(SOCKET socket)
 
 	retval = recv(pSession->socket, pSession->RecvQ.GetWriteBufferPtr(),
 		pSession->RecvQ.GetNotBrokenPutSize(), 0);
-
+	
+	//-----------------------------------------------------------------------------------
+	// 현 세션이 마지막으로 메시지를 받은 시간
+	//-----------------------------------------------------------------------------------
 	pSession->dwTrafficTick = timeGetTime();
 
 	pSession->RecvQ.MoveWritePos(retval);
@@ -244,21 +302,23 @@ void netProc_Recv(SOCKET socket)
 	{
 		if (retval < 0)
 		{
-			_LOG(dfLOG_LEVEL_ERROR, L"Recv Error - SessionID : %d \n", pSession->dwSessionID);
 			DisconnectSession(socket);
 			return;
 		}
 
 		else
-			PacketProc(pSession);
+			if (PacketProc(pSession))		break;
 	}
 }
 
+/*-------------------------------------------------------------------------------------*/
+// 패킷에 대한 처리
+/*-------------------------------------------------------------------------------------*/
 BOOL PacketProc(st_SESSION *pSession)
 {
 	st_NETWORK_PACKET_HEADER header;
 	CNPacket cPacket;
-	BYTE byEndCode;
+	BYTE byEndCode = 0;
 
 	//--------------------------------------------------------------------------------------*/
 	//RecvQ 용량이 header보다 작은지 검사
@@ -283,10 +343,9 @@ BOOL PacketProc(st_SESSION *pSession)
 		pSession->RecvQ.Get((char *)cPacket.GetBufferPtr(), header.bySize))
 		return FALSE;
 
-	if (dfNETWORK_PACKET_END != pSession->RecvQ.Get((char *)byEndCode, 1))
+	pSession->RecvQ.Get((char *)&byEndCode, 1);
+	if (dfNETWORK_PACKET_END != byEndCode)
 		return FALSE;
-
-	wprintf(L"PacketRecv [Session:%d][Type:%d]\n", pSession->dwSessionID, header.byType);
 
 	/*--------------------------------------------------------------------------------------*/
 	// Message 타입에 따른 Packet 처리
@@ -314,7 +373,7 @@ BOOL PacketProc(st_SESSION *pSession)
 		break;
 
 	default :
-		_LOG(dfLOG_LEVEL_ERROR, L"Packet Proc Error [SessionID : %d][PacketType : %d] \n", 
+		_LOG(dfLOG_LEVEL_ERROR, L"Packet Proc Error [SessionID : %d][PacketType : %d] ", 
 			pSession->dwSessionID, header.byType);
 		DisconnectSession(pSession->socket);
 		break;
@@ -359,7 +418,10 @@ void DisconnectSession(SOCKET socket)
 	Session::iterator sessionIter;
 	sessionIter = g_Session.find(socket);
 	
+	_LOG(dfLOG_LEVEL_DEBUG, L"Disconnect - [SessionID:%d][socket:%d]",
+		sessionIter->second->dwSessionID, socket);
 	shutdown(socket, SD_BOTH);
+	closesocket(socket);
 	delete sessionIter->second;
 	g_Session.erase(sessionIter);
 }
@@ -372,6 +434,7 @@ void DisconnectSession(SOCKET socket)
 //---------------------------------------------------------------------------------------
 BOOL recvProc_MoveStart(st_SESSION *pSession, CNPacket *pPacket)
 {
+	CNPacket cPacket;
 	BYTE byDirection;
 	short shX;
 	short shY;
@@ -387,7 +450,7 @@ BOOL recvProc_MoveStart(st_SESSION *pSession, CNPacket *pPacket)
 
 	if (NULL == pCharacter)
 	{
-		_LOG(dfLOG_LEVEL_ERROR, L"# MOVESTART > SessionID:%d Character Not Found!\n", 
+		_LOG(dfLOG_LEVEL_ERROR, L"# MOVESTART > SessionID:%d Character Not Found!", 
 			pSession->dwSessionID);
 		return FALSE;
 	}
@@ -405,7 +468,8 @@ BOOL recvProc_MoveStart(st_SESSION *pSession, CNPacket *pPacket)
 		// 차이나면 좌표 보정
 		if (abs(idrX - shX) > dfERROR_RANGE || abs(idrY - shY) > dfERROR_RANGE)
 		{
-			//Sync Packet 날림
+			makePacket_Sync(&cPacket, pSession->dwSessionID, idrX, idrY);
+			SendPacket_Around(pSession, &cPacket, true);
 		}
 
 		shX = idrX;
@@ -438,13 +502,17 @@ BOOL recvProc_MoveStart(st_SESSION *pSession, CNPacket *pPacket)
 	pCharacter->shY = shY;
 
 	//섹터 업데이트
+	if (Sector_UpdateCharacter(pCharacter))
+		CharacterSectorUpdatePacket(pCharacter);
 
 	//tick정보 저장
 	pCharacter->dwActionTick = timeGetTime();
 	pCharacter->shActionX = pCharacter->shX;
 	pCharacter->shActionY = pCharacter->shY;
 
-	sendProc_MoveStart(pCharacter);
+	makePacket_MoveStart(&cPacket, pCharacter->dwSessionID, byDirection, shX, shY);
+	SendPacket_Around(pCharacter->pSession, &cPacket);
+
 	return TRUE;
 }
 
@@ -453,7 +521,83 @@ BOOL recvProc_MoveStart(st_SESSION *pSession, CNPacket *pPacket)
 //---------------------------------------------------------------------------------------
 BOOL recvProc_MoveStop(st_SESSION *pSession, CNPacket *pPacket)
 {
+	CNPacket cPacket;
+	BYTE byDirection;
+	short shX;
+	short shY;
 
+	*pPacket >> byDirection;
+	*pPacket >> shX;
+	*pPacket >> shY;
+
+	_LOG(dfLOG_LEVEL_DEBUG, L"# MOVESTOP # [SessionID:%d][Direction:%d][X:%d][Y:%d]",
+		pSession->dwSessionID, byDirection, shX, shY);
+
+	st_CHARACTER *pCharacter = FindCharacter(pSession->dwSessionID);
+
+	if (NULL == pCharacter)
+	{
+		_LOG(dfLOG_LEVEL_ERROR, L"# MOVESTOP > SessionID:%d Character Not Found!\n",
+			pSession->dwSessionID);
+		return FALSE;
+	}
+
+	//-----------------------------------------------------------------------------------
+	// 받은 좌표와 서버 좌표가 너무 다를때 좌표 보정
+	//-----------------------------------------------------------------------------------
+	if (abs(pCharacter->shX - shX) > dfERROR_RANGE || abs(pCharacter->shY - shY) > dfERROR_RANGE)
+	{
+		int idrX, idrY;
+		// DeadReckoning으로 위치 확인
+		int iDeadRecFrame = DeadReckoningPos(pCharacter->dwAction, pCharacter->dwActionTick,
+			pCharacter->shActionX, pCharacter->shActionY, &idrX, &idrY);
+
+		// 차이나면 좌표 보정
+		if (abs(idrX - shX) > dfERROR_RANGE || abs(idrY - shY) > dfERROR_RANGE)
+		{
+			makePacket_Sync(&cPacket, pSession->dwSessionID, idrX, idrY);
+			SendPacket_Around(pSession, &cPacket, true);
+		}
+
+		shX = idrX;
+		shY = idrY;
+	}
+
+	//현재 액션 설정
+	pCharacter->dwAction = dfACTION_STAND;
+
+	//캐릭터 방향 설정
+	switch (byDirection)
+	{
+	case dfPACKET_MOVE_DIR_RR:
+	case dfPACKET_MOVE_DIR_RU:
+	case dfPACKET_MOVE_DIR_RD:
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_RR;
+		break;
+
+	case dfPACKET_MOVE_DIR_LL:
+	case dfPACKET_MOVE_DIR_LU:
+	case dfPACKET_MOVE_DIR_LD:
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_LL;
+		break;
+	}
+
+	pCharacter->shX = shX;
+	pCharacter->shY = shY;
+
+	//섹터 업데이트
+	if (Sector_UpdateCharacter(pCharacter))
+		CharacterSectorUpdatePacket(pCharacter);
+
+	//tick정보 저장
+	pCharacter->dwActionTick = timeGetTime();
+	pCharacter->shActionX = pCharacter->shX;
+	pCharacter->shActionY = pCharacter->shY;
+
+	makePacket_MoveStop(&cPacket, pCharacter->dwSessionID, byDirection, shX, shY);
+	SendPacket_Around(pCharacter->pSession, &cPacket);
+
+	return TRUE;
 }
 
 //---------------------------------------------------------------------------------------
@@ -461,7 +605,58 @@ BOOL recvProc_MoveStop(st_SESSION *pSession, CNPacket *pPacket)
 //---------------------------------------------------------------------------------------
 BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *pPacket)
 {
+	CNPacket cPacket;
 
+	BYTE byDirection;
+	short shX;
+	short shY;
+
+	*pPacket >> byDirection;
+	*pPacket >> shX;
+	*pPacket >> shY;
+
+	_LOG(dfLOG_LEVEL_DEBUG, L"Attack1 - [SessionID:%d][Direction:%d][X:%d][Y:%d]",
+		pSession->dwSessionID, byDirection, shX, shY);
+
+	st_CHARACTER *pCharacter = FindCharacter(pSession->dwSessionID);
+
+	if (NULL == pCharacter)
+	{
+		_LOG(dfLOG_LEVEL_ERROR, L"Attack1 > SessionID:%d Character Not Found!\n",
+			pSession->dwSessionID);
+		return FALSE;
+	}
+
+	//현재 액션 설정
+	pCharacter->dwAction = dfACTION_ATTACK1;
+
+	//캐릭터 방향 설정
+	switch (byDirection)
+	{
+	case dfPACKET_MOVE_DIR_RR:
+	case dfPACKET_MOVE_DIR_RU:
+	case dfPACKET_MOVE_DIR_RD:
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_RR;
+		break;
+
+	case dfPACKET_MOVE_DIR_LL:
+	case dfPACKET_MOVE_DIR_LU:
+	case dfPACKET_MOVE_DIR_LD:
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_LL;
+		break;
+	}
+
+	//충돌처리
+
+	//tick정보 저장
+	pCharacter->dwActionTick = timeGetTime();
+	pCharacter->shActionX = pCharacter->shX;
+	pCharacter->shActionY = pCharacter->shY;
+
+	makePacket_Attack1(&cPacket, pCharacter->dwSessionID, byDirection, pCharacter->shX, pCharacter->shY);
+	SendPacket_Around(pCharacter->pSession, &cPacket);
+
+	return TRUE;
 }
 
 //---------------------------------------------------------------------------------------
@@ -469,7 +664,58 @@ BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *pPacket)
 //---------------------------------------------------------------------------------------
 BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *pPacket)
 {
+	CNPacket cPacket;
 
+	BYTE byDirection;
+	short shX;
+	short shY;
+
+	*pPacket >> byDirection;
+	*pPacket >> shX;
+	*pPacket >> shY;
+
+	_LOG(dfLOG_LEVEL_DEBUG, L"Attack2 - [SessionID:%d][Direction:%d][X:%d][Y:%d]",
+		pSession->dwSessionID, byDirection, shX, shY);
+
+	st_CHARACTER *pCharacter = FindCharacter(pSession->dwSessionID);
+
+	if (NULL == pCharacter)
+	{
+		_LOG(dfLOG_LEVEL_ERROR, L"Attack2 > SessionID:%d Character Not Found!\n",
+			pSession->dwSessionID);
+		return FALSE;
+	}
+
+	//현재 액션 설정
+	pCharacter->dwAction = dfACTION_ATTACK2;
+
+	//캐릭터 방향 설정
+	switch (byDirection)
+	{
+	case dfPACKET_MOVE_DIR_RR:
+	case dfPACKET_MOVE_DIR_RU:
+	case dfPACKET_MOVE_DIR_RD:
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_RR;
+		break;
+
+	case dfPACKET_MOVE_DIR_LL:
+	case dfPACKET_MOVE_DIR_LU:
+	case dfPACKET_MOVE_DIR_LD:
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_LL;
+		break;
+	}
+
+	//충돌처리
+
+	//tick정보 저장
+	pCharacter->dwActionTick = timeGetTime();
+	pCharacter->shActionX = pCharacter->shX;
+	pCharacter->shActionY = pCharacter->shY;
+
+	makePacket_Attack2(&cPacket, pCharacter->dwSessionID, byDirection, pCharacter->shX, pCharacter->shY);
+	SendPacket_Around(pCharacter->pSession, &cPacket);
+
+	return TRUE;
 }
 
 //---------------------------------------------------------------------------------------
@@ -477,103 +723,58 @@ BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *pPacket)
 //---------------------------------------------------------------------------------------
 BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *pPacket)
 {
-
-}
-
-/*-------------------------------------------------------------------------------------*/
-
-
-/*-------------------------------------------------------------------------------------*/
-// Send Packet
-
-//---------------------------------------------------------------------------------------
-// 자신의 캐릭터 할당
-//---------------------------------------------------------------------------------------
-BOOL sendProc_CreateMyCharacter(st_SESSION *pSession, DWORD ID)
-{
-	st_NETWORK_PACKET_HEADER header;
 	CNPacket cPacket;
 
-	makePacket_CreateMyCharacter(&header, &cPacket, ID);
+	BYTE byDirection;
+	short shX;
+	short shY;
 
-	SendPacket_Unicast(pSession, &header, &cPacket);
-}
+	*pPacket >> byDirection;
+	*pPacket >> shX;
+	*pPacket >> shY;
 
-//---------------------------------------------------------------------------------------
-// 다른 클라이언트의 캐릭터 생성
-//---------------------------------------------------------------------------------------
-BOOL sendProc_CreateOtherCharacter()
-{
+	_LOG(dfLOG_LEVEL_DEBUG, L"Attack3 - [SessionID:%d][Direction:%d][X:%d][Y:%d]",
+		pSession->dwSessionID, byDirection, shX, shY);
 
-}
+	st_CHARACTER *pCharacter = FindCharacter(pSession->dwSessionID);
 
-//---------------------------------------------------------------------------------------
-// 캐릭터 삭제
-//---------------------------------------------------------------------------------------
-BOOL sendProc_DeleteCharacter()
-{
+	if (NULL == pCharacter)
+	{
+		_LOG(dfLOG_LEVEL_ERROR, L"Attack3 > SessionID:%d Character Not Found!\n",
+			pSession->dwSessionID);
+		return FALSE;
+	}
 
-}
+	//현재 액션 설정
+	pCharacter->dwAction = dfACTION_ATTACK3;
 
-//---------------------------------------------------------------------------------------
-// 캐릭터 이동시작
-//---------------------------------------------------------------------------------------
-BOOL sendProc_MoveStart(st_CHARACTER *pCharacter)
-{
-	st_NETWORK_PACKET_HEADER header;
-	CNPacket cPacket;
+	//캐릭터 방향 설정
+	switch (byDirection)
+	{
+	case dfPACKET_MOVE_DIR_RR:
+	case dfPACKET_MOVE_DIR_RU:
+	case dfPACKET_MOVE_DIR_RD:
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_RR;
+		break;
 
-	makePacket_MoveStart(&header, &cPacket, pCharacter);
+	case dfPACKET_MOVE_DIR_LL:
+	case dfPACKET_MOVE_DIR_LU:
+	case dfPACKET_MOVE_DIR_LD:
+		pCharacter->byDirection = dfPACKET_MOVE_DIR_LL;
+		break;
+	}
 
-	SendPacket_Around(pCharacter->pSession, &header, &cPacket);
-}
+	//충돌처리
 
-//---------------------------------------------------------------------------------------
-// 캐릭터 이동중지
-//---------------------------------------------------------------------------------------
-BOOL sendProc_MoveStop()
-{
+	//tick정보 저장
+	pCharacter->dwActionTick = timeGetTime();
+	pCharacter->shActionX = pCharacter->shX;
+	pCharacter->shActionY = pCharacter->shY;
 
-}
+	makePacket_Attack3(&cPacket, pCharacter->dwSessionID, byDirection, pCharacter->shX, pCharacter->shY);
+	SendPacket_Around(pCharacter->pSession, &cPacket);
 
-//---------------------------------------------------------------------------------------
-// 캐릭터 공격 1
-//---------------------------------------------------------------------------------------
-BOOL sendProc_Attack1()
-{
-
-}
-
-//---------------------------------------------------------------------------------------
-// 캐릭터 공격 2
-//---------------------------------------------------------------------------------------
-BOOL sendProc_Attack2()
-{
-
-}
-
-//---------------------------------------------------------------------------------------
-// 캐릭터 공격 3
-//---------------------------------------------------------------------------------------
-BOOL sendProc_Attack3()
-{
-
-}
-
-//---------------------------------------------------------------------------------------
-// 캐릭터 데미지
-//---------------------------------------------------------------------------------------
-BOOL sendProc_Damage()
-{
-
-}
-
-//---------------------------------------------------------------------------------------
-// 동기화
-//---------------------------------------------------------------------------------------
-BOOL sendProc_Sync()
-{
-
+	return TRUE;
 }
 
 /*-------------------------------------------------------------------------------------*/
@@ -583,108 +784,222 @@ BOOL sendProc_Sync()
 // Make Packet
 
 //---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
+// 자신의 캐릭터 생성 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_CreateMyCharacter(st_NETWORK_PACKET_HEADER *pHeader, CNPacket *pPacket, DWORD ID)
+void makePacket_CreateMyCharacter(CNPacket *pPacket, DWORD ID, BYTE byDirection, short shX,
+	short shY, BYTE chHP)
 {
-	int len;
+	st_NETWORK_PACKET_HEADER header;
+
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_CREATE_MY_CHARACTER;
+	header.bySize = 10;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
 
 	*pPacket << (unsigned int)ID;
-	//방향
-	*pPacket << (short)(rand() % 6400);
-	*pPacket << (short)(rand() % 6400);
-	*pPacket << (BYTE)100;
+	*pPacket << (BYTE)byDirection;
+	*pPacket << (short)shX;
+	*pPacket << (short)shY;
+	*pPacket << (BYTE)chHP;
 
-	len = pPacket->GetDataSize();
 	*pPacket << dfNETWORK_PACKET_END;
-
-	pHeader->byCode = dfNETWORK_PACKET_CODE;
-	pHeader->bySize = len;
-	pHeader->byType = dfPACKET_SC_CREATE_MY_CHARACTER;
 }
 
 //---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
+// 다른 캐릭터 생성 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_CreateOtherCharacter()
+void makePacket_CreateOtherCharacter(CNPacket *pPacket, DWORD ID, BYTE byDirection, short shX,
+	short shY, BYTE chHP)
 {
+	st_NETWORK_PACKET_HEADER header;
 
-}
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_CREATE_OTHER_CHARACTER;
+	header.bySize = 10;
 
-//---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
-//---------------------------------------------------------------------------------------
-void makePacket_DeleteCharacter()
-{
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
 
-}
+	*pPacket << (unsigned int)ID;
+	*pPacket << (BYTE)byDirection;
+	*pPacket << (short)shX;
+	*pPacket << (short)shY;
+	*pPacket << (BYTE)chHP;
 
-//---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
-//---------------------------------------------------------------------------------------
-void makePacket_MoveStart(st_NETWORK_PACKET_HEADER *pHeader, CNPacket *pPacket, st_CHARACTER *pCharacter)
-{
-	int len;
-
-	*pPacket << (unsigned int)pCharacter->dwSessionID;
-	*pPacket << pCharacter->byMoveDirection;
-	*pPacket << pCharacter->shX;
-	*pPacket << pCharacter->shY;
-
-	len = pPacket->GetDataSize();
 	*pPacket << dfNETWORK_PACKET_END;
+}
 
-	pHeader->byCode = dfNETWORK_PACKET_CODE;
-	pHeader->bySize = len;
-	pHeader->byType = dfPACKET_SC_MOVE_START;
+//---------------------------------------------------------------------------------------
+// 캐릭터 삭제 패킷
+//---------------------------------------------------------------------------------------
+void makePacket_DeleteCharacter(CNPacket *pPacket, DWORD ID)
+{
+	st_NETWORK_PACKET_HEADER header;
+
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_DELETE_CHARACTER;
+	header.bySize = 4;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
+
+	*pPacket << (unsigned int)ID;
+
+	*pPacket << dfNETWORK_PACKET_END;
 }
 
 //---------------------------------------------------------------------------------------
 // 캐릭터 이동 시작 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_MoveStop()
+void makePacket_MoveStart(CNPacket *pPacket, DWORD ID, BYTE byMoveDirection, short shX, short shY)
 {
+	st_NETWORK_PACKET_HEADER header;
 
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_MOVE_START;
+	header.bySize = 9;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
+
+	*pPacket << (unsigned int)ID;
+	*pPacket << (BYTE)byMoveDirection;
+	*pPacket << (short)shX;
+	*pPacket << (short)shY;
+
+	*pPacket << dfNETWORK_PACKET_END;
 }
 
 //---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
+// 캐릭터 이동 중지 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Attack1()
+void makePacket_MoveStop(CNPacket *pPacket, DWORD ID, BYTE byDirection, short shX, short shY)
 {
+	st_NETWORK_PACKET_HEADER header;
 
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_MOVE_STOP;
+	header.bySize = 4;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
+
+	*pPacket << (unsigned int)ID;
+	*pPacket << (BYTE)byDirection;
+	*pPacket << (short)shX;
+	*pPacket << (short)shY;
+
+	*pPacket << dfNETWORK_PACKET_END;
 }
 
 //---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
+// 캐릭터 공격1 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Attack2()
+void makePacket_Attack1(CNPacket *pPacket, DWORD ID, BYTE byDirection, short shX, short shY)
 {
+	st_NETWORK_PACKET_HEADER header;
 
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_ATTACK1;
+	header.bySize = 9;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
+
+	*pPacket << (unsigned int)ID;
+	*pPacket << (BYTE)byDirection;
+	*pPacket << (short)shX;
+	*pPacket << (short)shY;
+
+	*pPacket << dfNETWORK_PACKET_END;
 }
 
 //---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
+// 캐릭터 공격2 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Attack3()
+void makePacket_Attack2(CNPacket *pPacket, DWORD ID, BYTE byDirection, short shX, short shY)
 {
+	st_NETWORK_PACKET_HEADER header;
 
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_ATTACK2;
+	header.bySize = 9;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
+
+	*pPacket << (unsigned int)ID;
+	*pPacket << (BYTE)byDirection;
+	*pPacket << (short)shX;
+	*pPacket << (short)shY;
+
+	*pPacket << dfNETWORK_PACKET_END;
 }
 
 //---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
+// 캐릭터 공격3 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Damage()
+void makePacket_Attack3(CNPacket *pPacket, DWORD ID, BYTE byDirection, short shX, short shY)
 {
+	st_NETWORK_PACKET_HEADER header;
 
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_ATTACK3;
+	header.bySize = 9;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
+
+	*pPacket << (unsigned int)ID;
+	*pPacket << (BYTE)byDirection;
+	*pPacket << (short)shX;
+	*pPacket << (short)shY;
+
+	*pPacket << dfNETWORK_PACKET_END;
 }
 
 //---------------------------------------------------------------------------------------
-// 캐릭터 이동 시작 패킷
+// 데미지 패킷
 //---------------------------------------------------------------------------------------
-void makePacket_Sync()
+void makePacket_Damage(CNPacket *pPacket, DWORD AttackID, DWORD DamageID, BYTE DamageHP)
 {
+	st_NETWORK_PACKET_HEADER header;
 
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_DAMAGE;
+	header.bySize = 9;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
+
+	*pPacket << (unsigned int)AttackID;
+	*pPacket << (unsigned int)DamageID;
+	*pPacket << DamageHP;
+
+	*pPacket << dfNETWORK_PACKET_END;
+}
+
+//---------------------------------------------------------------------------------------
+// Sync 패킷
+//---------------------------------------------------------------------------------------
+void makePacket_Sync(CNPacket *pPacket, DWORD ID, short shX, short shY)
+{
+	st_NETWORK_PACKET_HEADER header;
+
+	header.byCode = dfNETWORK_PACKET_CODE;
+	header.byType = dfPACKET_SC_SYNC;
+	header.bySize = 8;
+
+	pPacket->Clear();
+	pPacket->Put((char *)&header, sizeof(header));
+	
+	*pPacket << (unsigned int)ID;
+	*pPacket << shX;
+	*pPacket << shY;
+
+	*pPacket << dfNETWORK_PACKET_END;
 }
 
 
@@ -698,38 +1013,63 @@ void makePacket_Sync()
 //---------------------------------------------------------------------------------------
 // 해당 Sector에 보냄
 //---------------------------------------------------------------------------------------
-void SendPacket_SectorOne(int iSectorX, int iSectorY, st_NETWORK_PACKET_HEADER *pHeader
-	,CNPacket *pPacket, st_SESSION *pExceptSession)
+void SendPacket_SectorOne(int iSectorX, int iSectorY, CNPacket *pPacket,
+	st_SESSION *pExceptSession)
 {
+	Sector::iterator sIter;
 
+	for (sIter = g_Sector[iSectorY][iSectorX].begin();
+		sIter != g_Sector[iSectorY][iSectorX].end(); ++sIter)
+	{
+		if ((*sIter)->pSession == pExceptSession)
+			continue;
+
+		(*sIter)->pSession->SendQ.Put((char *)pPacket->GetBufferPtr(), pPacket->GetDataSize());
+	}
 }
 
 //---------------------------------------------------------------------------------------
 // 해당 Session에 보냄
 //---------------------------------------------------------------------------------------
-void SendPacket_Unicast(st_SESSION *pSession, st_NETWORK_PACKET_HEADER *pHeader, 
-	CNPacket *pPacket)
+void SendPacket_Unicast(st_SESSION *pSession, CNPacket *pPacket)
 {
-	pSession->SendQ.Put((char *)pHeader, sizeof(st_NETWORK_PACKET_HEADER));
-	pSession->SendQ.Put((char *)pPacket, pPacket->GetDataSize());
+	pSession->SendQ.Put((char *)pPacket->GetBufferPtr(), pPacket->GetDataSize());
 }
 
 //---------------------------------------------------------------------------------------
 // 주위 Sector에 보냄
 //---------------------------------------------------------------------------------------
-void SendPacket_Around(st_SESSION *pSession, st_NETWORK_PACKET_HEADER *pHeader, 
-	CNPacket *pPacket, bool bSendMe = false)
+void SendPacket_Around(st_SESSION *pSession, CNPacket *pPacket, bool bSendMe)
 {
-	
+	st_CHARACTER *pCharacter = FindCharacter(pSession->dwSessionID);
+
+	st_SECTOR_AROUND stDestSector;
+	GetSectorAround(pCharacter->CurSecter.iX, pCharacter->CurSecter.iY, &stDestSector);
+
+	Sector::iterator sIter;
+
+	for (int iCnt = 0; iCnt < stDestSector.iCount; iCnt++)
+	{
+		if (!bSendMe)
+			SendPacket_SectorOne(stDestSector.Around[iCnt].iX, stDestSector.Around[iCnt].iY,
+			pPacket, pSession);
+		else
+			SendPacket_SectorOne(stDestSector.Around[iCnt].iX, stDestSector.Around[iCnt].iY,
+			pPacket, NULL);
+	}
 }
 
 //---------------------------------------------------------------------------------------
 // 전체 보냄
 //---------------------------------------------------------------------------------------
-void Sendpacket_Broadcast(st_SESSION *pSession, st_NETWORK_PACKET_HEADER *pHeader, 
-	CNPacket *pPacket)
+void Sendpacket_Broadcast(st_SESSION *pSession,	CNPacket *pPacket)
 {
+	Session::iterator sIter;
 
+	for (sIter = g_Session.begin(); sIter != g_Session.end(); ++sIter)
+	{
+		pSession->SendQ.Put((char *)pPacket->GetBufferPtr(), pPacket->GetDataSize());
+	}
 }
 
 /*-------------------------------------------------------------------------------------*/

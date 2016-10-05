@@ -88,11 +88,15 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Character.h" />
+    <ClInclude Include="Content.h" />
     <ClInclude Include="Log.h" />
     <ClInclude Include="Network.h" />
     <ClInclude Include="NPacket.h" />
+    <ClInclude Include="ObjectType.h" />
     <ClInclude Include="PacketDefine.h" />
     <ClInclude Include="Sector.h" />
+    <ClInclude Include="SectorDef.h" />
+    <ClInclude Include="Session.h" />
     <ClInclude Include="StreamQueue.h" />
     <ClInclude Include="TCPFighter_serv.h" />
   </ItemGroup>

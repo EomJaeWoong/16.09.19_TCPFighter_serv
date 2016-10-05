@@ -1,34 +1,15 @@
 #ifndef __SECTOR__H__
 #define __SECTOR__H__
 
-#define dfSECTOR_PIXEL_WIDTH	6400
-#define dfSECTOR_PIXEL_HEIGHT	6400
+#define dfSECTOR_PIXEL_WIDTH	100
+#define dfSECTOR_PIXEL_HEIGHT	100
 
-#define dfSECTOR_MAX_X			dfSECTOR_PIXEL_WIDTH / 10
-#define dfSECTOR_MAX_Y			dfSECTOR_PIXEL_HEIGHT / 10
-
-/*---------------------------------------------------------*/
-// Sector 하나의 좌표 정보
-/*---------------------------------------------------------*/
-struct st_SECTOR_POS
-{
-	int				iX;
-	int				iY;
-};
-
-
-/*---------------------------------------------------------*/
-// 특정 위치 주변의 9개 섹터 정보
-/*---------------------------------------------------------*/
-struct st_SECTOR_AROUND
-{
-	int				iCount;
-	st_SECTOR_POS	Around[9];
-};
+#define dfSECTOR_MAX_X			dfMAP_WIDTH / dfSECTOR_PIXEL_WIDTH
+#define dfSECTOR_MAX_Y			dfMAP_HEIGHT / dfSECTOR_PIXEL_HEIGHT
 
 typedef list<st_CHARACTER *> Sector;
 
-extern Sector g_Sector[dfSECTOR_MAX_Y][dfSECTOR_MAX_X];
+extern  Sector			g_Sector[dfSECTOR_MAX_Y][dfSECTOR_MAX_X];
 
 // 캐릭터의 현재 좌표 shX, shY 으로 섹터위치를 계산하여 해당 섹터에 넣음
 void Sector_AddCharacter(st_CHARACTER *pCharacter);
