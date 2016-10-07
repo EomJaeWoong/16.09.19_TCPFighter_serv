@@ -220,7 +220,7 @@ void CharacterSectorUpdatePacket(st_CHARACTER *pCharacter)
 		SendPacket_SectorOne(stAddSector.Around[iCnt].iX, stAddSector.Around[iCnt].iY, &cPacket, NULL);
 	}
 
-	// 이동 -> 이 패킷이 안감
+	// 이동
 	makePacket_MoveStart(&cPacket, pCharacter->dwSessionID, pCharacter->byMoveDirection,
 		pCharacter->shX, pCharacter->shY);
 

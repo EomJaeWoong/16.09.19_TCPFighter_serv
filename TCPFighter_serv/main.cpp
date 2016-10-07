@@ -22,8 +22,8 @@ using namespace std;
 #include "TCPFighter_serv.h"
 
 DWORD			g_dwLoopTime;					//루프 확인용
-DWORD			g_dwLoopCount = 0;					//루프 카운트
-bool			g_bShutdown = false;			//서버 플래그
+DWORD			g_dwLoopCount = 0;			//루프 카운트
+bool				g_bShutdown = false;			//서버 플래그
 
 void main()
 {

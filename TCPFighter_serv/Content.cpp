@@ -43,9 +43,9 @@ void Update()
 	// 게임 업데이트 처리 타이밍 계산
 	//----------------------------------------------------------------------------------
 	if (g_dwUpdateTick == 0)
-		g_dwUpdateTick = timeGetTime();
+		g_dwUpdateTick = GetTickCount();
 
-	DWORD dwOneFrameTick = timeGetTime() - g_dwUpdateTick;
+	DWORD dwOneFrameTick = GetTickCount() - g_dwUpdateTick;
 
 	if ((dwOneFrameTick + g_dwTick) < 1000 / dfSERVER_FRAME)
 		return;
@@ -53,7 +53,7 @@ void Update()
 	else
 	{
 		g_dwTick = dwOneFrameTick + g_dwTick - 1000 / dfSERVER_FRAME;
-		g_dwUpdateTick = timeGetTime();
+		g_dwUpdateTick = GetTickCount();
 		//wprintf(L"dwOneFrameTick : %d, g_dwUpdateTick : %d, g_dwTick : %d\n",
 		//	dwOneFrameTick, g_dwUpdateTick, g_dwTick);
 	}
@@ -69,9 +69,20 @@ void Update()
 		pCharacter = cIter->second;
 		cIter++;
 
-		//사망
+		//------------------------------------------------------------------------------
+		// 캐릭터 사망
+		//------------------------------------------------------------------------------
 		if (0 >= pCharacter->chHP)
+		{
+			CNPacket cPacket;
+
+			makePacket_DeleteCharacter(&cPacket, pCharacter->dwSessionID);
+			SendPacket_Around(pCharacter->pSession, &cPacket);
+
+			DeleteCharacter(pCharacter->dwSessionID);
+
 			DisconnectSession(pCharacter->pSession->socket);
+		}
 
 		else
 		{
@@ -220,4 +231,16 @@ st_CHARACTER *FindCharacter(DWORD dwSessionID)
 		pCharacter = cIter->second;
 
 	return pCharacter;
+}
+
+void	 DeleteCharacter(DWORD dwSessionID)
+{
+	Character::iterator cIter;
+
+	cIter = g_CharacterMap.find(dwSessionID);
+	if (cIter != g_CharacterMap.end())
+	{
+		delete cIter->second;
+		g_CharacterMap.erase(cIter);
+	}
 }

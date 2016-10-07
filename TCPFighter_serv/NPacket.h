@@ -285,15 +285,15 @@ protected:
 	//------------------------------------------------------------
 	// 패킷버퍼 / 버퍼 사이즈.
 	//------------------------------------------------------------
-	unsigned char	*m_chpBufferExpansion;
+	unsigned char		*m_chpBufferExpansion;
 
-	unsigned char	*m_chpBuffer;
+	unsigned char		*m_chpBuffer;
 	int				m_iBufferSize;
 	//------------------------------------------------------------
 	// 패킷버퍼 시작 위치.	(본 클래스 에서는 사용하지 않지만, 확장성을 위해 사용)
 	//------------------------------------------------------------
-	unsigned char	*m_chpDataFieldStart;
-	unsigned char	*m_chpDataFieldEnd;
+	unsigned char		*m_chpDataFieldStart;
+	unsigned char		*m_chpDataFieldEnd;
 
 
 	//------------------------------------------------------------

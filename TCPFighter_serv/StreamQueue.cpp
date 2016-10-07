@@ -182,7 +182,12 @@ void CAyaStreamSQ::RemoveData(int iSize)
 	if (GetUseSize() < iSize)
 		return;
 	else
-		m_iReadPos += iSize;
+	{
+		if (m_iReadPos + iSize >= GetBufferSize())
+			m_iReadPos = (m_iReadPos + iSize) % GetBufferSize();
+		else
+			m_iReadPos += iSize;
+	}
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -196,7 +201,12 @@ int	CAyaStreamSQ::MoveWritePos(int iSize)
 	if (GetFreeSize() < iSize)
 		return 0;
 	else
-		m_iWritePos += iSize;
+	{
+		if (m_iWritePos + iSize >= GetBufferSize())
+			m_iWritePos = (m_iWritePos + iSize) % GetBufferSize();
+		else
+			m_iWritePos += iSize;
+	}
 
 	return iSize;
 }

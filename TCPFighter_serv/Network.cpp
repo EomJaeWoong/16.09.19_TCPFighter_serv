@@ -147,19 +147,13 @@ void netIOProcess()
 					// Accept 贸府
 					//---------------------------------------------------------------------------
 					if ((*ReadIter)->fd_array[iCnt] == g_ListenSock)
-					{
 						netProc_Accept((*ReadIter)->fd_array[iCnt]);
-						continue;
-					}
 
 					//---------------------------------------------------------------------------
 					// Receive 贸府
 					//---------------------------------------------------------------------------
 					else
-					{
 						netProc_Recv((*ReadIter)->fd_array[iCnt]);
-						continue;
-					}
 				}
 
 				//-------------------------------------------------------------------------------
@@ -257,16 +251,16 @@ BOOL netProc_Send(SOCKET socket)
 		retval = send(socket, pSession->SendQ.GetReadBufferPtr(),
 			pSession->SendQ.GetNotBrokenGetSize(), 0);
 		pSession->SendQ.RemoveData(retval);
-	}
 
-	if (retval == 0)
-		return FALSE;
+		if (retval == 0)
+			return FALSE;
 
-	else if (retval < 0)
-	{
-		_LOG(dfLOG_LEVEL_ERROR, L"Send Error - SessionID : %d", pSession->dwSessionID);
-		DisconnectSession(socket);
-		return FALSE;
+		else if (retval < 0)
+		{
+			_LOG(dfLOG_LEVEL_ERROR, L"Send Error - SessionID : %d", pSession->dwSessionID);
+			DisconnectSession(socket);
+			return FALSE;
+		}
 	}
 
 	return TRUE;
@@ -422,7 +416,6 @@ void DisconnectSession(SOCKET socket)
 	_LOG(dfLOG_LEVEL_DEBUG, L"Disconnect - [SessionID:%d][socket:%d]",
 		sessionIter->second->dwSessionID, socket);
 	shutdown(socket, SD_BOTH);
-	closesocket(socket);
 	delete sessionIter->second;
 	g_Session.erase(sessionIter);
 }
@@ -647,8 +640,6 @@ BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *pPacket)
 		break;
 	}
 
-	//面倒贸府
-
 	//tick沥焊 历厘
 	pCharacter->dwActionTick = timeGetTime();
 	pCharacter->shActionX = pCharacter->shX;
@@ -656,6 +647,33 @@ BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *pPacket)
 
 	makePacket_Attack1(&cPacket, pCharacter->dwSessionID, byDirection, pCharacter->shX, pCharacter->shY);
 	SendPacket_Around(pCharacter->pSession, &cPacket);
+
+	//面倒贸府
+	if (g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].size() >= 2)
+	{
+		Sector::iterator sIter;
+
+		for (sIter = g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].begin();
+			sIter != g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].end(); ++sIter)
+		{
+			st_CHARACTER *pOtherCharacter = (*sIter);
+
+			if (pCharacter != pOtherCharacter)
+			{
+				if (abs(pCharacter->shX - pOtherCharacter->shX) < dfATTACK1_RANGE_X &&
+					abs(pCharacter->shY - pOtherCharacter->shY) < dfATTACK1_RANGE_Y)
+				{
+					pOtherCharacter->chHP -= dfATTACK1_DAMAGE;
+
+					makePacket_Damage(&cPacket, pCharacter->dwSessionID,
+						pOtherCharacter->dwSessionID,
+						pOtherCharacter->chHP);
+					SendPacket_SectorOne(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &cPacket,
+						NULL);
+				}
+			}
+		}
+	}
 
 	return TRUE;
 }
@@ -706,8 +724,6 @@ BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *pPacket)
 		break;
 	}
 
-	//面倒贸府
-
 	//tick沥焊 历厘
 	pCharacter->dwActionTick = timeGetTime();
 	pCharacter->shActionX = pCharacter->shX;
@@ -715,6 +731,33 @@ BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *pPacket)
 
 	makePacket_Attack2(&cPacket, pCharacter->dwSessionID, byDirection, pCharacter->shX, pCharacter->shY);
 	SendPacket_Around(pCharacter->pSession, &cPacket);
+
+	//面倒贸府
+	if (g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].size() >= 2)
+	{
+		Sector::iterator sIter;
+
+		for (sIter = g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].begin();
+			sIter != g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].end(); ++sIter)
+		{
+			st_CHARACTER *pOtherCharacter = (*sIter);
+
+			if (pCharacter != pOtherCharacter)
+			{
+				if (abs(pCharacter->shX - pOtherCharacter->shX) < dfATTACK2_RANGE_X &&
+					abs(pCharacter->shY - pOtherCharacter->shY) < dfATTACK2_RANGE_Y)
+				{
+					pOtherCharacter->chHP -= dfATTACK2_DAMAGE;
+
+					makePacket_Damage(&cPacket, pCharacter->dwSessionID,
+						pOtherCharacter->dwSessionID,
+						pOtherCharacter->chHP);
+					SendPacket_SectorOne(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &cPacket,
+						NULL);
+				}
+			}
+		}
+	}
 
 	return TRUE;
 }
@@ -765,8 +808,6 @@ BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *pPacket)
 		break;
 	}
 
-	//面倒贸府
-
 	//tick沥焊 历厘
 	pCharacter->dwActionTick = timeGetTime();
 	pCharacter->shActionX = pCharacter->shX;
@@ -775,6 +816,32 @@ BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *pPacket)
 	makePacket_Attack3(&cPacket, pCharacter->dwSessionID, byDirection, pCharacter->shX, pCharacter->shY);
 	SendPacket_Around(pCharacter->pSession, &cPacket);
 
+	//面倒贸府
+	if (g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].size() >= 2)
+	{
+		Sector::iterator sIter;
+
+		for (sIter = g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].begin();
+			sIter != g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].end(); ++sIter)
+		{
+			st_CHARACTER *pOtherCharacter = (*sIter);
+
+			if (pCharacter != pOtherCharacter)
+			{
+				if (abs(pCharacter->shX - pOtherCharacter->shX) < dfATTACK3_RANGE_X &&
+					abs(pCharacter->shY - pOtherCharacter->shY) < dfATTACK3_RANGE_Y)
+				{
+					pOtherCharacter->chHP -= dfATTACK3_DAMAGE;
+
+					makePacket_Damage(&cPacket, pCharacter->dwSessionID,
+						pOtherCharacter->dwSessionID,
+						pOtherCharacter->chHP);
+					SendPacket_SectorOne(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &cPacket,
+						NULL);
+				}
+			}
+		}
+	}
 	return TRUE;
 }
 
@@ -882,7 +949,7 @@ void makePacket_MoveStop(CNPacket *pPacket, DWORD ID, BYTE byDirection, short sh
 
 	header.byCode = dfNETWORK_PACKET_CODE;
 	header.byType = dfPACKET_SC_MOVE_STOP;
-	header.bySize = 4;
+	header.bySize = 9;
 
 	pPacket->Clear();
 	pPacket->Put((char *)&header, sizeof(header));

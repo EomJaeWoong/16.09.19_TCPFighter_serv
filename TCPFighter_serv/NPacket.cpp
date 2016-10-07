@@ -74,6 +74,7 @@ void	CNPacket::Clear(void)
 	memset(m_chpBuffer, NULL, m_iBufferSize);
 	m_chpWritePos = GetBufferPtr();
 	m_chpReadPos = GetBufferPtr();
+	m_iDataSize = 0;
 }
 
 //////////////////////////////////////////////////////////////////////////
