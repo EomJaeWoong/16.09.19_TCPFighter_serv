@@ -7,7 +7,7 @@
 /////////////////////////////////////////////////////////////////////////
 CAyaStreamSQ::CAyaStreamSQ()
 {
-	Initial(1000);
+	Initial(10000);
 }
 
 CAyaStreamSQ::CAyaStreamSQ(int iBufferSize)

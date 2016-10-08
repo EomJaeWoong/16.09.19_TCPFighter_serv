@@ -1,5 +1,6 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
+#include <math.h>
 #include <list>
 #include <map>
 
@@ -141,7 +142,13 @@ void netIOProcess()
 		else
 		{
 			for (int iCnt = 0; iCnt < retval; iCnt++){
-				if (FD_ISSET((*ReadIter)->fd_array[iCnt], *ReadIter))
+				//-------------------------------------------------------------------------------
+				// Send 처리
+				//-------------------------------------------------------------------------------
+				if (FD_ISSET((*WriteIter)->fd_array[iCnt], *WriteIter))
+					netProc_Send((*WriteIter)->fd_array[iCnt]);
+
+				else if (FD_ISSET((*ReadIter)->fd_array[iCnt], *ReadIter))
 				{
 					//---------------------------------------------------------------------------
 					// Accept 처리
@@ -155,12 +162,6 @@ void netIOProcess()
 					else
 						netProc_Recv((*ReadIter)->fd_array[iCnt]);
 				}
-
-				//-------------------------------------------------------------------------------
-				// Send 처리
-				//-------------------------------------------------------------------------------
-				else if (FD_ISSET((*WriteIter)->fd_array[iCnt], *WriteIter))
-					netProc_Send((*WriteIter)->fd_array[iCnt]);
 			}
 		}
 	}
@@ -213,7 +214,6 @@ BOOL netProc_Accept(SOCKET socket)
 	//-----------------------------------------------------------------------------------
 	st_CHARACTER *pCharacter = CreateCharacter(pSession);
 	g_CharacterMap.insert(pair<DWORD, st_CHARACTER *>(pSession->dwSessionID, pCharacter));
-	Sector_UpdateCharacter(pCharacter);
 
 	//-----------------------------------------------------------------------------------
 	// 캐릭터 생성 전송
@@ -302,7 +302,7 @@ void netProc_Recv(SOCKET socket)
 		}
 
 		else
-			if (PacketProc(pSession))		break;
+			PacketProc(pSession);
 	}
 }
 
@@ -398,6 +398,9 @@ st_SESSION *CreateSession(SOCKET socket)
 	pSession->socket = socket;
 	pSession->dwSessionID = ++uiSessionCount;
 
+	pSession->RecvQ.ClearBuffer();
+	pSession->SendQ.ClearBuffer();
+
 	pSession->dwTrafficTick = 0;
 	pSession->dwTrafficCount = 0;
 	pSession->dwTrafficSecondTick = 0;
@@ -411,8 +414,17 @@ st_SESSION *CreateSession(SOCKET socket)
 void DisconnectSession(SOCKET socket)
 {
 	Session::iterator sessionIter;
+	Character::iterator cIter;
+
 	sessionIter = g_Session.find(socket);
-	
+	cIter = g_CharacterMap.find(sessionIter->second->dwSessionID);
+
+	if (cIter != g_CharacterMap.end())
+	{
+		delete cIter->second;
+		g_CharacterMap.erase(cIter);
+	}
+
 	_LOG(dfLOG_LEVEL_DEBUG, L"Disconnect - [SessionID:%d][socket:%d]",
 		sessionIter->second->dwSessionID, socket);
 	shutdown(socket, SD_BOTH);
@@ -560,21 +572,7 @@ BOOL recvProc_MoveStop(st_SESSION *pSession, CNPacket *pPacket)
 	//현재 액션 설정
 	pCharacter->dwAction = dfACTION_STAND;
 
-	//캐릭터 방향 설정
-	switch (byDirection)
-	{
-	case dfPACKET_MOVE_DIR_RR:
-	case dfPACKET_MOVE_DIR_RU:
-	case dfPACKET_MOVE_DIR_RD:
-		pCharacter->byDirection = dfPACKET_MOVE_DIR_RR;
-		break;
-
-	case dfPACKET_MOVE_DIR_LL:
-	case dfPACKET_MOVE_DIR_LU:
-	case dfPACKET_MOVE_DIR_LD:
-		pCharacter->byDirection = dfPACKET_MOVE_DIR_LL;
-		break;
-	}
+	pCharacter->byDirection = byDirection;
 
 	pCharacter->shX = shX;
 	pCharacter->shY = shY;
@@ -668,8 +666,7 @@ BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *pPacket)
 					makePacket_Damage(&cPacket, pCharacter->dwSessionID,
 						pOtherCharacter->dwSessionID,
 						pOtherCharacter->chHP);
-					SendPacket_SectorOne(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &cPacket,
-						NULL);
+					SendPacket_Around(pCharacter->pSession, &cPacket, true);
 				}
 			}
 		}
@@ -752,8 +749,7 @@ BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *pPacket)
 					makePacket_Damage(&cPacket, pCharacter->dwSessionID,
 						pOtherCharacter->dwSessionID,
 						pOtherCharacter->chHP);
-					SendPacket_SectorOne(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &cPacket,
-						NULL);
+					SendPacket_Around(pCharacter->pSession, &cPacket, true);
 				}
 			}
 		}
@@ -836,8 +832,7 @@ BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *pPacket)
 					makePacket_Damage(&cPacket, pCharacter->dwSessionID,
 						pOtherCharacter->dwSessionID,
 						pOtherCharacter->chHP);
-					SendPacket_SectorOne(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &cPacket,
-						NULL);
+					SendPacket_Around(pCharacter->pSession, &cPacket, true);
 				}
 			}
 		}
@@ -1150,6 +1145,9 @@ int DeadReckoningPos(DWORD dwAction, DWORD dwActionTick, int iOldPosX, int iOldP
 	DWORD dwIntervalTick = timeGetTime() - dwActionTick;
 
 	int iActionFrame = dwIntervalTick / 20;
+	int iRemoveFrame = 0;
+
+	int iValue;
 
 	int iRPosX = iOldPosX;
 	int iRPosY = iOldPosY;
@@ -1206,37 +1204,84 @@ int DeadReckoningPos(DWORD dwAction, DWORD dwActionTick, int iOldPosX, int iOldP
 	// 화면 영역을 벗어났을 때 처리
 	if (iRPosX <= dfRANGE_MOVE_LEFT)
 	{
-		iRPosX = dfRANGE_MOVE_LEFT;
-		iRPosY = iRPosY - ((iRPosY - iOldPosY) / (iRPosX - iOldPosX)) * iRPosX;
+		iValue = abs(dfRANGE_MOVE_LEFT - abs(iRPosX)) / dfRECKONING_SPEED_PLAYER_X;
+		iRemoveFrame = max(iValue, iRemoveFrame);
 	}
 
 	if (iRPosX >= dfRANGE_MOVE_RIGHT)
 	{
-		iRPosX = dfRANGE_MOVE_RIGHT;
-		iRPosY = iRPosY - ((iRPosY - iOldPosY) / (iRPosX - iOldPosX)) * iRPosX;
+		iValue = abs(dfRANGE_MOVE_RIGHT - iRPosX) / dfRECKONING_SPEED_PLAYER_X;
+		iRemoveFrame = max(iValue, iRemoveFrame);
 	}
 
 	if (iRPosY <= dfRANGE_MOVE_TOP)
 	{
-		if (0 != (iRPosX - iOldPosX))
-			iRPosX = iRPosY / ((iRPosY - iOldPosY) / (iRPosX - iOldPosX)) - iRPosX;
-
-		else
-			iRPosX = iOldPosX;
-
-		iRPosY = dfRANGE_MOVE_TOP;
+		iValue = abs(dfRANGE_MOVE_TOP - abs(iRPosY)) / dfRECKONING_SPEED_PLAYER_Y;
+		iRemoveFrame = max(iValue, iRemoveFrame);
 	}
 
 	if (iRPosY >= dfRANGE_MOVE_BOTTOM)
 	{
-		if (0 != (iRPosX - iOldPosX))
-			iRPosX = iRPosY / ((iRPosY - iOldPosY) / (iRPosX - iOldPosX)) - iRPosX;
-			
-		else
-			iRPosX = iOldPosX;
-
-		iRPosY = dfRANGE_MOVE_BOTTOM;
+		iValue = abs(dfRANGE_MOVE_BOTTOM - abs(iRPosY)) / dfRECKONING_SPEED_PLAYER_Y;
+		iRemoveFrame = max(iValue, iRemoveFrame);
 	}
+
+	// 삭제할 프레임이 있으면 좌표를 재계산
+	if (iRemoveFrame > 0)
+	{
+		iActionFrame -= iRemoveFrame;
+
+		iDX = iActionFrame * dfRECKONING_SPEED_PLAYER_X;
+		iDY = iActionFrame * dfRECKONING_SPEED_PLAYER_Y;
+
+		switch (dwAction)
+		{
+		case dfACTION_MOVE_LL:
+			iRPosX = iOldPosX - iDX;
+			iRPosY = iOldPosY;
+			break;
+
+		case dfACTION_MOVE_LU:
+			iRPosX = iOldPosX - iDX;
+			iRPosY = iOldPosY - iDY;
+			break;
+
+		case dfACTION_MOVE_UU:
+			iRPosX = iOldPosX;
+			iRPosY = iOldPosY - iDY;
+			break;
+
+		case dfACTION_MOVE_RU:
+			iRPosX = iOldPosX + iDX;
+			iRPosY = iOldPosY - iDY;
+			break;
+
+		case dfACTION_MOVE_RR:
+			iRPosX = iOldPosX + iDX;
+			iRPosY = iOldPosY;
+			break;
+
+		case dfACTION_MOVE_RD:
+			iRPosX = iOldPosX + iDX;
+			iRPosY = iOldPosY + iDY;
+			break;
+
+		case dfACTION_MOVE_DD:
+			iRPosX = iOldPosX;
+			iRPosY = iOldPosY + iDY;
+			break;
+
+		case dfACTION_MOVE_LD:
+			iRPosX = iOldPosX - iDX;
+			iRPosY = iOldPosY + iDY;
+			break;
+		}
+	}
+
+	iRPosX = min(iRPosX, dfRANGE_MOVE_RIGHT);
+	iRPosX = max(iRPosX, dfRANGE_MOVE_LEFT);
+	iRPosY = min(iRPosY, dfRANGE_MOVE_BOTTOM);
+	iRPosY = max(iRPosY, dfRANGE_MOVE_TOP);
 
 	*pPosX = iRPosX;
 	*pPosY = iRPosY;

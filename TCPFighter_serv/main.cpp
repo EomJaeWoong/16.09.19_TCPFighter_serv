@@ -99,7 +99,7 @@ void monitor()
 		wprintf(L"[%4d/%02d/%02d][%02d:%02d:%02d]  Frame : %d  Loop : %d\n",
 			today.tm_year + 1900, today.tm_mon + 1, today.tm_mday, 
 			today.tm_hour, today.tm_min, today.tm_sec,
-			dfSERVER_FRAME, g_dwLoopCount);
+			1000 / (1000 / dfSERVER_FRAME), g_dwLoopCount);
 		g_dwLoopTime = dwEndTime;
 		g_dwLoopCount = 0;
 	}

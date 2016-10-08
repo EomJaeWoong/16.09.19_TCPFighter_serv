@@ -19,9 +19,8 @@ Sector			g_Sector[dfSECTOR_MAX_Y][dfSECTOR_MAX_X];
 
 void Sector_AddCharacter(st_CHARACTER *pCharacter)
 {
-	//if ((pCharacter->CurSector.iX > 0) || (pCharacter->CurSector.iY >0) ||
-	//	(pCharacter->CurSector.iX > dfSECTOR_MAX_X) || (pCharacter->CurSector.iX > dfSECTOR_MAX_Y))
-	//	return;
+	if (pCharacter->CurSector.iX != -1 || pCharacter->CurSector.iY != -1)
+		return;
 
 	int iSectorX = pCharacter->shX / dfSECTOR_PIXEL_WIDTH;
 	int iSectorY = pCharacter->shY / dfSECTOR_PIXEL_HEIGHT;
@@ -41,9 +40,8 @@ void Sector_AddCharacter(st_CHARACTER *pCharacter)
 
 void Sector_RemoveCharacter(st_CHARACTER *pCharacter)
 {
-	//if ((pCharacter->CurSector.iX > 0) || (pCharacter->CurSector.iY >0) ||
-	//	(pCharacter->CurSector.iX > dfSECTOR_MAX_X) || (pCharacter->CurSector.iX > dfSECTOR_MAX_Y))
-	//	return;
+	if (pCharacter->CurSector.iX == -1 || pCharacter->CurSector.iY == -1)
+		return;
 
 	Sector &SectorList = g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX];
 	Sector::iterator sIter;
@@ -217,7 +215,8 @@ void CharacterSectorUpdatePacket(st_CHARACTER *pCharacter)
 	// 생성
 	for (int iCnt = 0; iCnt < stAddSector.iCount; iCnt++)
 	{
-		SendPacket_SectorOne(stAddSector.Around[iCnt].iX, stAddSector.Around[iCnt].iY, &cPacket, NULL);
+		SendPacket_SectorOne(stAddSector.Around[iCnt].iX, stAddSector.Around[iCnt].iY, &cPacket,
+			pCharacter->pSession);
 	}
 
 	// 이동
@@ -226,7 +225,8 @@ void CharacterSectorUpdatePacket(st_CHARACTER *pCharacter)
 
 	for (int iCnt = 0; iCnt < stAddSector.iCount; iCnt++)
 	{
-		SendPacket_SectorOne(stAddSector.Around[iCnt].iX, stAddSector.Around[iCnt].iY, &cPacket, NULL);
+		SendPacket_SectorOne(stAddSector.Around[iCnt].iX, stAddSector.Around[iCnt].iY, &cPacket, 
+			pCharacter->pSession);
 	}
 
 	//---------------------------------------------------------------------------------------------------

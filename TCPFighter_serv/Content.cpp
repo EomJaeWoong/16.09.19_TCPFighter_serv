@@ -19,6 +19,7 @@ using namespace std;
 
 Character		g_CharacterMap;
 DWORD			g_dwUpdateTick;							//업데이트 시간
+DWORD			g_dwOneFrameTick;
 DWORD			g_dwTick;
 
 /*-------------------------------------------------------------------------------------*/
@@ -43,19 +44,18 @@ void Update()
 	// 게임 업데이트 처리 타이밍 계산
 	//----------------------------------------------------------------------------------
 	if (g_dwUpdateTick == 0)
-		g_dwUpdateTick = GetTickCount();
+		g_dwUpdateTick = timeGetTime();
 
-	DWORD dwOneFrameTick = GetTickCount() - g_dwUpdateTick;
+	g_dwOneFrameTick = timeGetTime() - g_dwUpdateTick;
 
-	if ((dwOneFrameTick + g_dwTick) < 1000 / dfSERVER_FRAME)
+	if ((g_dwOneFrameTick + g_dwTick) < 1000 / dfSERVER_FRAME)
 		return;
 
 	else
 	{
-		g_dwTick = dwOneFrameTick + g_dwTick - 1000 / dfSERVER_FRAME;
-		g_dwUpdateTick = GetTickCount();
-		//wprintf(L"dwOneFrameTick : %d, g_dwUpdateTick : %d, g_dwTick : %d\n",
-		//	dwOneFrameTick, g_dwUpdateTick, g_dwTick);
+		g_dwTick += g_dwOneFrameTick - 1000 / dfSERVER_FRAME;
+		g_dwUpdateTick = timeGetTime();
+		//_LOG(dfLOG_LEVEL_DEBUG, L"OneFrameTick : %d, g_dwTick : %d, g_dwUpdateTick : %d", g_dwOneFrameTick, g_dwTick, g_dwUpdateTick);
 	}
 
 	//----------------------------------------------------------------------------------
@@ -79,8 +79,6 @@ void Update()
 			makePacket_DeleteCharacter(&cPacket, pCharacter->dwSessionID);
 			SendPacket_Around(pCharacter->pSession, &cPacket);
 
-			DeleteCharacter(pCharacter->dwSessionID);
-
 			DisconnectSession(pCharacter->pSession->socket);
 		}
 
@@ -100,10 +98,12 @@ void Update()
 				
 				case dfACTION_MOVE_LL :
 					if (pCharacter->shX - dfSPEED_PLAYER_X > dfRANGE_MOVE_LEFT)
+					{
 						pCharacter->shX -= dfSPEED_PLAYER_X;
-					_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move LL [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
-						pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
-						pCharacter->dwSessionID);
+						_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move LL [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
+							pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
+							pCharacter->dwSessionID);
+					}
 					break;
 
 				case dfACTION_MOVE_LU :
@@ -112,18 +112,20 @@ void Update()
 					{
 						pCharacter->shX -= dfSPEED_PLAYER_X;
 						pCharacter->shY -= dfSPEED_PLAYER_Y;
+						_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move LU [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
+							pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
+							pCharacter->dwSessionID);
 					}
-					_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move LU [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
-						pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
-						pCharacter->dwSessionID);
 					break;
 
 				case dfACTION_MOVE_UU :
 					if (pCharacter->shY - dfSPEED_PLAYER_Y > dfRANGE_MOVE_TOP)
+					{
 						pCharacter->shY -= dfSPEED_PLAYER_Y;
-					_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move UU [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
-						pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
-						pCharacter->dwSessionID);
+						_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move UU [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
+							pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
+							pCharacter->dwSessionID);
+					}
 					break;
 
 				case dfACTION_MOVE_RU :
@@ -132,18 +134,21 @@ void Update()
 					{
 						pCharacter->shX += dfSPEED_PLAYER_X;
 						pCharacter->shY -= dfSPEED_PLAYER_Y;
+
+						_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move RU [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
+							pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
+							pCharacter->dwSessionID);
 					}
-					_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move RU [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
-						pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
-						pCharacter->dwSessionID);
 					break;
 
 				case dfACTION_MOVE_RR :
 					if (pCharacter->shX + dfSPEED_PLAYER_X < dfRANGE_MOVE_RIGHT)
+					{
 						pCharacter->shX += dfSPEED_PLAYER_X;
-					_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move RR [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
-						pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
-						pCharacter->dwSessionID);
+						_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move RR [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
+							pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
+							pCharacter->dwSessionID);
+					}
 					break;
 
 				case dfACTION_MOVE_RD :
@@ -152,18 +157,20 @@ void Update()
 					{
 						pCharacter->shX += dfSPEED_PLAYER_X;
 						pCharacter->shY += dfSPEED_PLAYER_Y;
+						_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move RD [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
+							pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
+							pCharacter->dwSessionID);
 					}
-					_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move RD [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
-						pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
-						pCharacter->dwSessionID);
 					break;
 
 				case dfACTION_MOVE_DD :
 					if (pCharacter->shY + dfSPEED_PLAYER_Y < dfRANGE_MOVE_BOTTOM)
+					{
 						pCharacter->shY += dfSPEED_PLAYER_Y;
-					_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move DD [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
-						pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
-						pCharacter->dwSessionID);
+						_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move DD [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
+							pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
+							pCharacter->dwSessionID);
+					}
 					break;
 
 				case dfACTION_MOVE_LD :
@@ -172,10 +179,10 @@ void Update()
 					{
 						pCharacter->shX -= dfSPEED_PLAYER_X;
 						pCharacter->shY += dfSPEED_PLAYER_Y;
+						_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move LD [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
+							pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
+							pCharacter->dwSessionID);
 					}
-					_LOG(dfLOG_LEVEL_DEBUG, L"Update - Move LD [X:%d][Y:%d][SectorX:%d][SectorY:%d][Session:%d]",
-						pCharacter->shX, pCharacter->shY, pCharacter->CurSector.iX, pCharacter->CurSector.iY,
-						pCharacter->dwSessionID);
 					break;
 			}
 
@@ -203,14 +210,18 @@ st_CHARACTER *CreateCharacter(st_SESSION *pSession)
 	
 	pCharacter->dwAction = dfACTION_STAND;
 	pCharacter->dwActionTick = 0;
-	
-	pCharacter->byDirection = dfACTION_MOVE_LL;
-	pCharacter->byMoveDirection = dfACTION_STAND;
 
 	pCharacter->shX = rand() % 6400;
 	pCharacter->shY = rand() % 6400;
 	pCharacter->shActionX = pCharacter->shX;
 	pCharacter->shActionY = pCharacter->shY;
+
+	if ((pCharacter->shX % 2) == 0)
+		pCharacter->byDirection = dfACTION_MOVE_LL;
+	else
+		pCharacter->byDirection = dfACTION_MOVE_RR;
+
+	pCharacter->byMoveDirection = dfACTION_STAND;
 
 	pCharacter->CurSector.iX = pCharacter->shX / dfSECTOR_PIXEL_WIDTH;
 	pCharacter->CurSector.iY = pCharacter->shY / dfSECTOR_PIXEL_HEIGHT;
@@ -231,16 +242,4 @@ st_CHARACTER *FindCharacter(DWORD dwSessionID)
 		pCharacter = cIter->second;
 
 	return pCharacter;
-}
-
-void	 DeleteCharacter(DWORD dwSessionID)
-{
-	Character::iterator cIter;
-
-	cIter = g_CharacterMap.find(dwSessionID);
-	if (cIter != g_CharacterMap.end())
-	{
-		delete cIter->second;
-		g_CharacterMap.erase(cIter);
-	}
 }
