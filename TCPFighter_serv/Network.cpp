@@ -647,12 +647,15 @@ BOOL recvProc_Attack1(st_SESSION *pSession, CNPacket *pPacket)
 	SendPacket_Around(pCharacter->pSession, &cPacket);
 
 	//面倒贸府
-	if (g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].size() >= 2)
+	st_SECTOR_AROUND stAroundSector;
+	GetSectorAround(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &stAroundSector);
+
+	for (int iCnt = 0; iCnt < stAroundSector.iCount; iCnt++)
 	{
 		Sector::iterator sIter;
 
-		for (sIter = g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].begin();
-			sIter != g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].end(); ++sIter)
+		for (sIter = g_Sector[stAroundSector.Around[iCnt].iY][stAroundSector.Around[iCnt].iX].begin();
+			sIter != g_Sector[stAroundSector.Around[iCnt].iY][stAroundSector.Around[iCnt].iX].end(); ++sIter)
 		{
 			st_CHARACTER *pOtherCharacter = (*sIter);
 
@@ -730,12 +733,15 @@ BOOL recvProc_Attack2(st_SESSION *pSession, CNPacket *pPacket)
 	SendPacket_Around(pCharacter->pSession, &cPacket);
 
 	//面倒贸府
-	if (g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].size() >= 2)
+	st_SECTOR_AROUND stAroundSector;
+	GetSectorAround(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &stAroundSector);
+
+	for (int iCnt = 0; iCnt < stAroundSector.iCount; iCnt++)
 	{
 		Sector::iterator sIter;
 
-		for (sIter = g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].begin();
-			sIter != g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].end(); ++sIter)
+		for (sIter = g_Sector[stAroundSector.Around[iCnt].iY][stAroundSector.Around[iCnt].iX].begin();
+			sIter != g_Sector[stAroundSector.Around[iCnt].iY][stAroundSector.Around[iCnt].iX].end(); ++sIter)
 		{
 			st_CHARACTER *pOtherCharacter = (*sIter);
 
@@ -813,12 +819,15 @@ BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *pPacket)
 	SendPacket_Around(pCharacter->pSession, &cPacket);
 
 	//面倒贸府
-	if (g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].size() >= 2)
+	st_SECTOR_AROUND stAroundSector;
+	GetSectorAround(pCharacter->CurSector.iX, pCharacter->CurSector.iY, &stAroundSector);
+
+	for (int iCnt = 0; iCnt < stAroundSector.iCount; iCnt++)
 	{
 		Sector::iterator sIter;
 
-		for (sIter = g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].begin();
-			sIter != g_Sector[pCharacter->CurSector.iY][pCharacter->CurSector.iX].end(); ++sIter)
+		for (sIter = g_Sector[stAroundSector.Around[iCnt].iY][stAroundSector.Around[iCnt].iX].begin();
+			sIter != g_Sector[stAroundSector.Around[iCnt].iY][stAroundSector.Around[iCnt].iX].end(); ++sIter)
 		{
 			st_CHARACTER *pOtherCharacter = (*sIter);
 
@@ -837,6 +846,7 @@ BOOL recvProc_Attack3(st_SESSION *pSession, CNPacket *pPacket)
 			}
 		}
 	}
+	
 	return TRUE;
 }
 
