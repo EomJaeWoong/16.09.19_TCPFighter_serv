@@ -13,6 +13,8 @@ extern Session	g_Session;
 
 void netSetup();
 void netIOProcess();
+void SelectProc(SOCKET *SocketTable, FD_SET *ReadSet, FD_SET *WriteSet, int iSize);
+
 BOOL netProc_Accept(SOCKET socket);						//Accept 贸府
 BOOL netProc_Send(SOCKET socket);						//Send 贸府
 void netProc_Recv(SOCKET socket);						//receive 贸府

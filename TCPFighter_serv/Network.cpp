@@ -74,15 +74,92 @@ void netIOProcess()
 {
 	int retval;
 
+	//----------------------------------------------------------------------------------
+	// Set 검사를 위한 소켓 테이블
+	//----------------------------------------------------------------------------------
+	SOCKET SocketTable[FD_SETSIZE];
+	int iSocketCount = 0;
+
+	FD_SET ReadSet;
+	FD_SET WriteSet;
+
+	for (int iCnt = 0; iCnt < FD_SETSIZE; iCnt++)
+		SocketTable[iCnt] = INVALID_SOCKET;
+
+	//----------------------------------------------------------------------------------
+	// ReadSet, WriteSet 초기화
+	//----------------------------------------------------------------------------------
+	FD_ZERO(&ReadSet);
+	FD_ZERO(&WriteSet);
+
+	//----------------------------------------------------------------------------------
+	// Listen Socket 추가
+	//----------------------------------------------------------------------------------
+	FD_SET(g_ListenSock, &ReadSet);
+	SocketTable[0] = g_ListenSock;
+	iSocketCount++;
+
+	//----------------------------------------------------------------------------------
+	// 전체 Session에 대해 작업 수행
+	// - ReadSet 등록
+	// - SendQ에 데이터가 존재하면 WriteSet 등록
+	//----------------------------------------------------------------------------------
+	Session::iterator SessionIter;
+	for (SessionIter = g_Session.begin(); SessionIter != g_Session.end(); SessionIter++)
+	{
+		SocketTable[iSocketCount] = SessionIter->first;
+
+		//------------------------------------------------------------------------------
+		// ReadSet 등록
+		//------------------------------------------------------------------------------
+		FD_SET(SessionIter->first, &ReadSet);
+
+		//------------------------------------------------------------------------------
+		// ReadSet, WriteSet 초기화
+		//------------------------------------------------------------------------------
+		if (SessionIter->second->SendQ.GetUseSize() > 0)
+			FD_SET(SessionIter->first, &WriteSet);
+
+		iSocketCount++;
+
+		//------------------------------------------------------------------------------
+		// SetSize 최대일 때
+		//------------------------------------------------------------------------------
+		if (iSocketCount >= FD_SETSIZE)
+		{
+			SelectProc(SocketTable, &ReadSet, &WriteSet, iSocketCount);
+
+			FD_ZERO(&ReadSet);
+			FD_ZERO(&WriteSet);
+
+			iSocketCount = 0;
+
+			for (int iCnt = 0; iCnt < FD_SETSIZE; iCnt++)
+				SocketTable[iCnt] = INVALID_SOCKET;
+
+			SocketTable[0] = g_ListenSock;
+
+			FD_SET(g_ListenSock, &ReadSet);
+			iSocketCount++;
+		}
+	}
+
+	//---------------------------------------------------------------------------------
+	// 남은 Set 들에 대한 Socket처리
+	//---------------------------------------------------------------------------------
+	if (iSocketCount > 0)
+		SelectProc(SocketTable, &ReadSet, &WriteSet, iSocketCount);
+	/*
 	Session::iterator sessionIter;
 	SetList ReadList, WriteList;
-
+	
 	//---------------------------------------------------------------------------------
 	// socket 등록
 	//---------------------------------------------------------------------------------
 	FD_SET *ReadSet = new FD_SET;
 	FD_SET *WriteSet = new FD_SET;
-	int iSocketCount = 0;
+	int iReadCount = 0;
+	int iWriteCount = 0;
 
 	FD_ZERO(ReadSet);
 	FD_ZERO(WriteSet);
@@ -91,31 +168,38 @@ void netIOProcess()
 	WriteList.push_back(WriteSet);
 
 	FD_SET(g_ListenSock, ReadSet);
-	iSocketCount++;
+	iReadCount++;
 
 	sessionIter = g_Session.begin();
 
 	while (sessionIter != g_Session.end()){
-		if (iSocketCount > 64)
+		if (iReadCount > 63)
 		{
 			ReadSet = new FD_SET;
-			WriteSet = new FD_SET;
-
 			ReadList.push_back(ReadSet);
+			FD_ZERO(ReadSet);		
+
+			iReadCount = 0;
+		}
+
+		if (iWriteCount > 63)
+		{
+			WriteSet = new FD_SET;
 			WriteList.push_back(WriteSet);
+			FD_ZERO(WriteSet);
 
-			FD_ZERO(&ReadSet);
-			FD_ZERO(&WriteSet);
-
-			iSocketCount = 0;
+			iWriteCount = 0;
 		}
 
 		if (sessionIter != g_Session.end() && sessionIter->second->SendQ.GetUseSize() > 0)
+		{
 			FD_SET(sessionIter->second->socket, WriteSet);
+			iWriteCount++;
+		}
 
 		FD_SET(sessionIter->second->socket, ReadSet);
 		sessionIter++;
-		iSocketCount++;
+		iReadCount++;
 	}
 	//---------------------------------------------------------------------------------
 
@@ -123,58 +207,101 @@ void netIOProcess()
 	Time.tv_sec = 0;
 	Time.tv_usec = 0;
 
-	SetList::iterator ReadIter;
-	SetList::iterator WriteIter;
+	SetList::iterator ReadIter = ReadList.begin();
+	SetList::iterator WriteIter = WriteList.begin();
 
-	for (ReadIter = ReadList.begin(), WriteIter = WriteList.begin();
-		ReadIter != ReadList.end() || WriteIter != WriteList.end(); ++ReadIter, ++WriteIter){
-		retval = select(0, (*ReadIter), (*WriteIter), NULL, &Time);
+	//---------------------------------------------------------------------------------
+	// Select
+	//---------------------------------------------------------------------------------
+	retval = select(0, (*ReadIter), (*WriteIter), NULL, &Time);
 
-		if (retval == 0)		break;
+	//---------------------------------------------------------------------------------
+	// Select 결과 처리
+	//---------------------------------------------------------------------------------
+	if (retval == 0)		return;
 
-		else if (retval < 0)
-		{
-			DWORD dwError = GetLastError();
-			wprintf(L"Select() Error : %d\n", dwError);
-			exit(1);
-		}
+	else if (retval < 0)
+	{
+		DWORD dwError = GetLastError();
+		wprintf(L"Select() Error : %d\n", dwError);
+		exit(1);
+	}
 
-		else
-		{
-			for (int iCnt = 0; iCnt < retval; iCnt++){
-				//-------------------------------------------------------------------------------
-				// Send 처리
-				//-------------------------------------------------------------------------------
-				if (FD_ISSET((*WriteIter)->fd_array[iCnt], *WriteIter))
-					netProc_Send((*WriteIter)->fd_array[iCnt]);
+	else
+	{
+		bool bSocketFlag = false;
 
-				else if (FD_ISSET((*ReadIter)->fd_array[iCnt], *ReadIter))
+		for (int iCnt = 0; iCnt < retval; iCnt++){
+			//-------------------------------------------------------------------------------
+			// Send 처리
+			//-------------------------------------------------------------------------------
+			for (WriteIter = WriteList.begin(); WriteIter != WriteList.end(); WriteIter++)
+			{
+				for (int iCntForSend = 0; iCntForSend < (*WriteIter)->fd_count; iCntForSend++)
 				{
-					//---------------------------------------------------------------------------
-					// Accept 처리
-					//---------------------------------------------------------------------------
-					if ((*ReadIter)->fd_array[iCnt] == g_ListenSock)
-						netProc_Accept((*ReadIter)->fd_array[iCnt]);
+					if (FD_ISSET((*WriteIter)->fd_array[iCnt], *WriteIter))
+					{
+						netProc_Send((*WriteIter)->fd_array[iCnt]);
+						bSocketFlag = true;
+						break;
+					}
+				}
 
-					//---------------------------------------------------------------------------
-					// Receive 처리
-					//---------------------------------------------------------------------------
-					else
-						netProc_Recv((*ReadIter)->fd_array[iCnt]);
+				if (bSocketFlag)
+				{
+					bSocketFlag = false;
+					break;
+				}
+			}
+
+			for (ReadIter = ReadList.begin(); ReadIter != ReadList.end(); ReadIter++)
+			{
+				for (int iCntForRecv = 0; iCntForRecv < (*ReadIter)->fd_count; iCntForRecv++)
+				{
+					if (FD_ISSET((*ReadIter)->fd_array[iCnt], *ReadIter))
+					{
+						//---------------------------------------------------------------------------
+						// Accept 처리
+						//---------------------------------------------------------------------------
+						if ((*ReadIter)->fd_array[iCnt] == g_ListenSock)
+						{
+							netProc_Accept((*ReadIter)->fd_array[iCnt]);
+							bSocketFlag = true;
+							break;
+						}
+
+						//---------------------------------------------------------------------------
+						// Receive 처리
+						//---------------------------------------------------------------------------
+						else
+						{
+							netProc_Recv((*ReadIter)->fd_array[iCnt]);
+							bSocketFlag = true;
+							break;
+						}
+					}
+				}
+
+				if (bSocketFlag)
+				{
+					bSocketFlag = false;
+					break;
 				}
 			}
 		}
 	}
+	//-----------------------------------------------------------------------------------
 
 	//---------------------------------------------------------------------------------
 	// FD_SET List 정리
 	//---------------------------------------------------------------------------------
+	/*
 	if (0 == iSocketCount)
 	{
 		delete ReadSet;
 		delete WriteSet;
 	}
-
+	
 	for (ReadIter = ReadList.begin(); ReadIter != ReadList.end(); ++ReadIter)
 		delete (*ReadIter);
 
@@ -183,7 +310,78 @@ void netIOProcess()
 
 	ReadList.clear();
 	WriteList.clear();
+	*/
 }
+
+void SelectProc(SOCKET *SocketTable, FD_SET *ReadSet, FD_SET *WriteSet,int iSize)
+{
+	int retval;
+
+	Session::iterator SessionIter;
+
+	TIMEVAL Time;
+	Time.tv_sec = 0;
+	Time.tv_usec = 0;
+
+	//---------------------------------------------------------------------------------
+	// Select
+	//---------------------------------------------------------------------------------
+	retval = select(0, ReadSet, WriteSet, NULL, &Time);
+
+	//---------------------------------------------------------------------------------
+	// Select 결과 처리
+	//---------------------------------------------------------------------------------
+	if (retval == 0)		return;
+
+	else if (retval < 0)
+	{
+		DWORD dwError = GetLastError();
+		wprintf(L"Select() Error : %d\n", dwError);
+		exit(1);
+	}
+
+	else
+	{
+		for (int iSession = 0; iSession < FD_SETSIZE; iSession++)
+		{
+			for (int iResult = 0; iResult < retval; iResult++)
+			{
+				//-------------------------------------------------------------------------------
+				// 비어있는 소켓 넘어감
+				//-------------------------------------------------------------------------------
+				if (INVALID_SOCKET == SocketTable[iSession])
+					continue;
+
+				//-------------------------------------------------------------------------------
+				// Send 처리
+				//-------------------------------------------------------------------------------
+				if (FD_ISSET(SocketTable[iSession], WriteSet))
+				{
+					netProc_Send(SocketTable[iSession]);
+					break;
+				}
+
+				if (FD_ISSET(SocketTable[iSession], ReadSet))
+				{
+					//---------------------------------------------------------------------------
+					// Accept 처리
+					//---------------------------------------------------------------------------
+					if (SocketTable[iSession] == g_ListenSock)
+						netProc_Accept(g_ListenSock);
+
+					//---------------------------------------------------------------------------
+					// Receive 처리
+					//---------------------------------------------------------------------------
+					else
+						netProc_Recv(SocketTable[iSession]);
+
+					break;
+				}
+			}
+		}
+	}
+}
+
 
 /*-------------------------------------------------------------------------------------*/
 // Accpet Process
