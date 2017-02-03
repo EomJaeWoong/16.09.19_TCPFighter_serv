@@ -47,6 +47,14 @@ void netSetup()
 		return;
 
 	//-----------------------------------------------------------------------------------
+	// 소켓 옵션
+	//-----------------------------------------------------------------------------------
+	BOOL optval;
+	retval = setsockopt(g_ListenSock, IPPROTO_TCP, TCP_NODELAY, (char *)&optval, sizeof(optval));
+	if (retval == SOCKET_ERROR)
+		_LOG(dfLOG_LEVEL_ERROR, L"setsockopt()");
+
+	//-----------------------------------------------------------------------------------
 	// bind
 	//-----------------------------------------------------------------------------------
 	SOCKADDR_IN sockaddr;
@@ -105,23 +113,23 @@ void netIOProcess()
 	// - SendQ에 데이터가 존재하면 WriteSet 등록
 	//----------------------------------------------------------------------------------
 	Session::iterator SessionIter;
-	for (SessionIter = g_Session.begin(); SessionIter != g_Session.end(); SessionIter++)
+	for (SessionIter = g_Session.begin(); SessionIter != g_Session.end(); )
 	{
-		SocketTable[iSocketCount] = SessionIter->first;
-
 		//------------------------------------------------------------------------------
 		// ReadSet 등록
 		//------------------------------------------------------------------------------
-		FD_SET(SessionIter->first, &ReadSet);
+		FD_SET(SessionIter->second->socket, &ReadSet);
 
 		//------------------------------------------------------------------------------
 		// ReadSet, WriteSet 초기화
 		//------------------------------------------------------------------------------
 		if (SessionIter->second->SendQ.GetUseSize() > 0)
-			FD_SET(SessionIter->first, &WriteSet);
+			FD_SET(SessionIter->second->socket, &WriteSet);
 
+		SocketTable[iSocketCount] = SessionIter->second->socket;
 		iSocketCount++;
 
+		SessionIter++;
 		//------------------------------------------------------------------------------
 		// SetSize 최대일 때
 		//------------------------------------------------------------------------------
@@ -388,6 +396,8 @@ void SelectProc(SOCKET *SocketTable, FD_SET *ReadSet, FD_SET *WriteSet,int iSize
 /*-------------------------------------------------------------------------------------*/
 BOOL netProc_Accept(SOCKET socket)
 {
+	int retval;
+
 	int addrlen = sizeof(SOCKADDR_IN);
 	WCHAR wcAddr[16];
 	SOCKET sessionSock;
@@ -456,7 +466,7 @@ BOOL netProc_Send(SOCKET socket)
 		else if (retval < 0)
 		{
 			_LOG(dfLOG_LEVEL_ERROR, L"Send Error - SessionID : %d", pSession->dwSessionID);
-			DisconnectSession(socket);
+			DisconnectClient(pSession->dwSessionID);
 			return FALSE;
 		}
 	}
@@ -482,9 +492,9 @@ void netProc_Recv(SOCKET socket)
 
 	pSession->RecvQ.MoveWritePos(retval);
 
-	if (retval == 0)
+	if (retval <= 0)
 	{
-		DisconnectSession(socket);
+		DisconnectClient(pSession->dwSessionID);
 		return;
 	}
 
@@ -495,7 +505,7 @@ void netProc_Recv(SOCKET socket)
 	{
 		if (retval < 0)
 		{
-			DisconnectSession(socket);
+			DisconnectClient(pSession->dwSessionID);
 			return;
 		}
 
@@ -612,22 +622,37 @@ st_SESSION *CreateSession(SOCKET socket)
 void DisconnectSession(SOCKET socket)
 {
 	Session::iterator sessionIter;
-	Character::iterator cIter;
 
 	sessionIter = g_Session.find(socket);
-	cIter = g_CharacterMap.find(sessionIter->second->dwSessionID);
+
+	//shutdown(socket, SD_BOTH);
+	closesocket(socket);
+	sessionIter->second->socket = INVALID_SOCKET;
+
+	delete sessionIter->second;
+	g_Session.erase(sessionIter);
+}
+
+/*-------------------------------------------------------------------------------------*/
+// 세션 끊기
+/*-------------------------------------------------------------------------------------*/
+void DisconnectClient(DWORD dwSessionID)
+{
+	Character::iterator cIter;
+	SOCKET SessionSocket;
+
+	cIter = g_CharacterMap.find(dwSessionID);
+	SessionSocket = cIter->second->pSession->socket;
 
 	if (cIter != g_CharacterMap.end())
 	{
+		DisconnectSession(SessionSocket);
 		delete cIter->second;
 		g_CharacterMap.erase(cIter);
 	}
 
 	_LOG(dfLOG_LEVEL_DEBUG, L"Disconnect - [SessionID:%d][socket:%d]",
-		sessionIter->second->dwSessionID, socket);
-	shutdown(socket, SD_BOTH);
-	delete sessionIter->second;
-	g_Session.erase(sessionIter);
+		dwSessionID, SessionSocket);
 }
 
 /*-------------------------------------------------------------------------------------*/

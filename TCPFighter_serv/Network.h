@@ -22,6 +22,7 @@ void netProc_Recv(SOCKET socket);						//receive 贸府
 st_SESSION *FindSession(SOCKET socket);					//技记 茫扁
 st_SESSION *CreateSession(SOCKET socket);				//技记 积己
 void DisconnectSession(SOCKET socket);					//技记 谗扁
+void DisconnectClient(DWORD dwSessionID);
 
 BOOL PacketProc(st_SESSION *pSession);
 
